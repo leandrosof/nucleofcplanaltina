@@ -1129,16 +1129,36 @@ export async function finalizeMatchAction(
         })
         .returning({ id: games.id });
 
+      const nextSideIds = [...plan.sideA, ...plan.sideB];
+      const preferenceRows = await tx
+        .select({
+          userId: attendances.userId,
+          preference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
+        })
+        .from(attendances)
+        .innerJoin(users, eq(users.id, attendances.userId))
+        .where(
+          and(
+            eq(attendances.eventId, game.eventId),
+            inArray(attendances.userId, nextSideIds),
+          ),
+        );
+      const preferenceById = new Map(preferenceRows.map((row) => [row.userId, row.preference]));
+      const goalkeeperA = goalkeeperForSide(plan.sideA, preferenceById);
+      const goalkeeperB = goalkeeperForSide(plan.sideB, preferenceById);
+
       await tx.insert(gamePlayers).values([
         ...plan.sideA.map((userId) => ({
           gameId: next.id,
           teamId: nextTeamAId,
           userId,
+          position: userId === goalkeeperA ? ("GOALKEEPER" as const) : ("FIELD" as const),
         })),
         ...plan.sideB.map((userId) => ({
           gameId: next.id,
           teamId: nextTeamBId,
           userId,
+          position: userId === goalkeeperB ? ("GOALKEEPER" as const) : ("FIELD" as const),
         })),
       ]);
 
