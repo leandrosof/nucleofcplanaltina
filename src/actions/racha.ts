@@ -79,54 +79,6 @@ function toRule(value: string): RachaRule {
   return "HYBRID";
 }
 
-function goalkeeperPreferenceMap(rows: PresentRow[]): Map<string, "FIXED" | "FIELD" | "ANY"> {
-  return new Map(rows.map((row) => [row.userId, row.goalkeeperPreference]));
-}
-
-function distributeGoalkeepers(
-  teams: { players: string[] }[],
-  preference: Map<string, "FIXED" | "FIELD" | "ANY">,
-): Map<number, string> {
-  const isFixed = (userId: string) => preference.get(userId) === "FIXED";
-  const assigned = new Map<number, string>();
-
-  teams.forEach((team, teamIndex) => {
-    const fixed = team.players.find(isFixed);
-    if (fixed) assigned.set(teamIndex, fixed);
-  });
-
-  const extras: { teamIndex: number; userId: string }[] = [];
-  teams.forEach((team, teamIndex) => {
-    for (const userId of team.players) {
-      if (isFixed(userId) && assigned.get(teamIndex) !== userId) {
-        extras.push({ teamIndex, userId });
-      }
-    }
-  });
-
-  for (let teamIndex = 0; teamIndex < teams.length && extras.length > 0; teamIndex += 1) {
-    if (assigned.has(teamIndex)) continue;
-    const extra = extras.shift()!;
-    const donor = teams[extra.teamIndex];
-    const recipient = teams[teamIndex];
-    const targetIndex = recipient.players.findIndex((userId) => !isFixed(userId));
-    if (targetIndex === -1) continue;
-    const target = recipient.players[targetIndex];
-    donor.players[donor.players.indexOf(extra.userId)] = target;
-    recipient.players[targetIndex] = extra.userId;
-    assigned.set(teamIndex, extra.userId);
-  }
-
-  return assigned;
-}
-
-function goalkeeperForSide(
-  side: readonly string[],
-  preference: Map<string, "FIXED" | "FIELD" | "ANY">,
-): string | null {
-  return side.find((userId) => preference.get(userId) === "FIXED") ?? null;
-}
-
 async function loadPresent(tx: Tx, eventId: string): Promise<PresentRow[]> {
   return tx
     .select({
@@ -310,13 +262,6 @@ async function createSession(
     );
 
   const present = await loadPresent(tx, eventId);
-  const needed = teamSize * 2 * courtCount;
-  if (present.length < needed) {
-    throw new AppError(
-      `Faltam ${needed - present.length} jogador(es) para abrir ${courtCount} quadra(s) de ${teamSize}.`,
-    );
-  }
-
   const ordered = present
     .slice()
     .sort((a, b) => a.gamesPlayed - b.gamesPlayed || (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
@@ -346,14 +291,28 @@ async function createSession(
     })
     .returning();
 
-  const teamCount = Math.floor(ordered.length / teamSize);
-  if (teamCount < courtCount * 2) {
+  const neededField = teamSize * 2 * courtCount;
+  const fieldPool = ordered.filter((row) => row.goalkeeperPreference !== "FIXED");
+  const fixedPool = ordered.filter((row) => row.goalkeeperPreference === "FIXED");
+
+  while (fieldPool.length < neededField && fixedPool.length > 0) {
+    fieldPool.push(fixedPool.shift()!);
+  }
+
+  if (fieldPool.length < neededField) {
     throw new AppError(
-      `São necessários ${courtCount * 2} times completos de ${teamSize} para abrir ${courtCount} quadra(s).`,
+      `Faltam ${neededField - fieldPool.length} jogador(es) de linha para abrir ${courtCount} quadra(s) de ${teamSize} + goleiro.`,
     );
   }
 
-  const teams: { id: string; players: string[] }[] = [];
+  const teamCount = Math.floor(fieldPool.length / teamSize);
+  if (teamCount < courtCount * 2) {
+    throw new AppError(
+      `São necessários ${courtCount * 2} times completos de ${teamSize} jogadores de linha para abrir ${courtCount} quadra(s).`,
+    );
+  }
+
+  const teams: { id: string; players: string[]; goalkeeperId: string | null }[] = [];
   for (let index = 0; index < teamCount; index += 1) {
     const visual = teamVisualForIndex(index);
     const [team] = await tx
@@ -367,22 +326,22 @@ async function createSession(
       .returning({ id: drawTeams.id });
     teams.push({
       id: team.id,
-      players: ordered
+      players: fieldPool
         .slice(index * teamSize, (index + 1) * teamSize)
         .map((row) => row.userId),
+      goalkeeperId: fixedPool[index]?.userId ?? null,
     });
   }
-
-  const preference = goalkeeperPreferenceMap(ordered);
-  const goalkeeperByTeam = distributeGoalkeepers(teams, preference);
 
   for (let court = 1; court <= courtCount; court += 1) {
     const teamAIndex = (court - 1) * 2;
     const teamBIndex = teamAIndex + 1;
     const teamA = teams[teamAIndex];
     const teamB = teams[teamBIndex];
-    const goalkeeperA = goalkeeperByTeam.get(teamAIndex) ?? null;
-    const goalkeeperB = goalkeeperByTeam.get(teamBIndex) ?? null;
+    const goalkeeperA = teamA.goalkeeperId;
+    const goalkeeperB = teamB.goalkeeperId;
+    const courtPlayersA = [...teamA.players, ...(goalkeeperA ? [goalkeeperA] : [])];
+    const courtPlayersB = [...teamB.players, ...(goalkeeperB ? [goalkeeperB] : [])];
 
     const [game] = await tx
       .insert(games)
@@ -404,14 +363,20 @@ async function createSession(
         gameId: game.id,
         teamId: teamA.id,
         userId,
-        position: userId === goalkeeperA ? ("GOALKEEPER" as const) : ("FIELD" as const),
+        position: "FIELD" as const,
       })),
       ...teamB.players.map((userId) => ({
         gameId: game.id,
         teamId: teamB.id,
         userId,
-        position: userId === goalkeeperB ? ("GOALKEEPER" as const) : ("FIELD" as const),
+        position: "FIELD" as const,
       })),
+      ...(goalkeeperA
+        ? [{ gameId: game.id, teamId: teamA.id, userId: goalkeeperA, role: "SUB" as const, position: "GOALKEEPER" as const }]
+        : []),
+      ...(goalkeeperB
+        ? [{ gameId: game.id, teamId: teamB.id, userId: goalkeeperB, role: "SUB" as const, position: "GOALKEEPER" as const }]
+        : []),
     ]);
 
     await tx.insert(rotationCourts).values({
@@ -420,12 +385,12 @@ async function createSession(
       status: "PLAYING",
       teamAId: teamA.id,
       teamBId: teamB.id,
-      playerAIds: teamA.players,
-      playerBIds: teamB.players,
+      playerAIds: courtPlayersA,
+      playerBIds: courtPlayersB,
       currentGameId: game.id,
     });
 
-    for (const userId of [...teamA.players, ...teamB.players]) {
+    for (const userId of [...courtPlayersA, ...courtPlayersB]) {
       await tx
         .update(attendances)
         .set({
@@ -441,7 +406,8 @@ async function createSession(
   let position = 0;
   for (let index = courtCount * 2; index < teams.length; index += 1) {
     const team = teams[index];
-    for (const userId of team.players) {
+    const blockPlayers = [...team.players, ...(team.goalkeeperId ? [team.goalkeeperId] : [])];
+    for (const userId of blockPlayers) {
       position += 1;
       await tx
         .update(attendances)
@@ -455,8 +421,9 @@ async function createSession(
     }
   }
 
-  const freePlayers = ordered.slice(teamCount * teamSize);
-  for (const row of freePlayers) {
+  const freeFieldPlayers = fieldPool.slice(teamCount * teamSize);
+  const freeFixedPlayers = fixedPool.slice(teamCount);
+  for (const row of [...freeFieldPlayers, ...freeFixedPlayers]) {
     position += 1;
     await tx
       .update(attendances)
@@ -469,7 +436,6 @@ async function createSession(
       .where(and(eq(attendances.eventId, eventId), eq(attendances.userId, row.userId)));
   }
 
-  return { draw };
   return { draw };
 }
 
@@ -499,15 +465,23 @@ async function mountNextForCourt(
     .limit(1);
   if (!courtRow) return null;
 
-  const present = (await loadPresent(tx, eventId)).filter(
+  const waiting = (await loadPresent(tx, eventId)).filter(
     (row) => row.rotationStatus === "WAITING",
   );
-  const plan = planFirstMatch(toRachaPlayers(present), draw.teamSize, "HYBRID");
+  const fixedGoalkeepers = waiting.filter((row) => row.goalkeeperPreference === "FIXED");
+  const fieldPlayers = waiting.filter((row) => row.goalkeeperPreference !== "FIXED");
+  const plan = planFirstMatch(toRachaPlayers(fieldPlayers), draw.teamSize, "HYBRID");
   if (!plan.ok) return null;
 
-  const preference = goalkeeperPreferenceMap(present);
-  const goalkeeperA = goalkeeperForSide(plan.sideA, preference);
-  const goalkeeperB = goalkeeperForSide(plan.sideB, preference);
+  const goalkeeperA = fixedGoalkeepers[0]?.userId ?? null;
+  const goalkeeperB = fixedGoalkeepers[1]?.userId ?? null;
+  const usedGoalkeepers = new Set([goalkeeperA, goalkeeperB].filter(Boolean));
+  const sideA = [...plan.sideA, ...(goalkeeperA ? [goalkeeperA] : [])];
+  const sideB = [...plan.sideB, ...(goalkeeperB ? [goalkeeperB] : [])];
+  const queue = [
+    ...plan.queue,
+    ...fixedGoalkeepers.filter((row) => !usedGoalkeepers.has(row.userId)).map((row) => row.userId),
+  ];
 
   const [teamCountRow] = await tx
     .select({ total: sql<number>`count(*)` })
@@ -552,14 +526,20 @@ async function mountNextForCourt(
       gameId: game.id,
       teamId: teamA.id,
       userId,
-      position: userId === goalkeeperA ? ("GOALKEEPER" as const) : ("FIELD" as const),
+      position: "FIELD" as const,
     })),
     ...plan.sideB.map((userId) => ({
       gameId: game.id,
       teamId: teamB.id,
       userId,
-      position: userId === goalkeeperB ? ("GOALKEEPER" as const) : ("FIELD" as const),
+      position: "FIELD" as const,
     })),
+    ...(goalkeeperA
+      ? [{ gameId: game.id, teamId: teamA.id, userId: goalkeeperA, role: "SUB" as const, position: "GOALKEEPER" as const }]
+      : []),
+    ...(goalkeeperB
+      ? [{ gameId: game.id, teamId: teamB.id, userId: goalkeeperB, role: "SUB" as const, position: "GOALKEEPER" as const }]
+      : []),
   ]);
 
   await tx
@@ -568,14 +548,14 @@ async function mountNextForCourt(
       status: "PLAYING",
       teamAId: teamA.id,
       teamBId: teamB.id,
-      playerAIds: plan.sideA,
-      playerBIds: plan.sideB,
+      playerAIds: sideA,
+      playerBIds: sideB,
       currentGameId: game.id,
       updatedAt: new Date(),
     })
     .where(eq(rotationCourts.id, courtRow.id));
 
-  await applyLineup(tx, eventId, plan.sideA, plan.sideB, plan.queue);
+  await applyLineup(tx, eventId, sideA, sideB, queue);
   return game.id;
 }
 
@@ -845,13 +825,26 @@ export async function startMatchAction(
       if (live) throw new AppError("Já existe uma partida em andamento.");
 
       const roster = await tx
-        .select({ teamId: gamePlayers.teamId })
+        .select({ teamId: gamePlayers.teamId, position: gamePlayers.position })
         .from(gamePlayers)
         .where(and(eq(gamePlayers.gameId, game.id), isNull(gamePlayers.leftAt)));
-      const sideA = roster.filter((row) => row.teamId === game.teamAId).length;
-      const sideB = roster.filter((row) => row.teamId === game.teamBId).length;
-      if (sideA === 0 || sideA !== sideB) {
-        throw new AppError("Complete os dois times com o mesmo número de jogadores antes de iniciar.");
+      const fieldA = roster.filter(
+        (row) => row.teamId === game.teamAId && row.position === "FIELD",
+      ).length;
+      const fieldB = roster.filter(
+        (row) => row.teamId === game.teamBId && row.position === "FIELD",
+      ).length;
+      const goalkeeperA = roster.filter(
+        (row) => row.teamId === game.teamAId && row.position === "GOALKEEPER",
+      ).length;
+      const goalkeeperB = roster.filter(
+        (row) => row.teamId === game.teamBId && row.position === "GOALKEEPER",
+      ).length;
+      if (fieldA === 0 || fieldA !== fieldB) {
+        throw new AppError("Complete os dois times com o mesmo número de jogadores de linha antes de iniciar.");
+      }
+      if (goalkeeperA !== 1 || goalkeeperB !== 1) {
+        throw new AppError("Defina um goleiro para cada time antes de iniciar a partida.");
       }
 
       await tx
@@ -904,16 +897,27 @@ export async function finalizeMatchAction(
       if (game.status !== "IN_PROGRESS") throw new AppError("Esta partida não está em andamento.");
 
       const roster = await tx
-        .select({ userId: gamePlayers.userId, teamId: gamePlayers.teamId })
+        .select({
+          userId: gamePlayers.userId,
+          teamId: gamePlayers.teamId,
+          position: gamePlayers.position,
+        })
         .from(gamePlayers)
         .where(and(eq(gamePlayers.gameId, game.id), isNull(gamePlayers.leftAt)));
-      const sideA = roster.filter((row) => row.teamId === game.teamAId).map((row) => row.userId);
-      const sideB = roster.filter((row) => row.teamId === game.teamBId).map((row) => row.userId);
-      if (sideA.length === 0 || sideA.length !== sideB.length) {
-        throw new AppError("Há jogador faltando. Substitua antes de finalizar a partida.");
+      const fieldA = roster
+        .filter((row) => row.teamId === game.teamAId && row.position === "FIELD")
+        .map((row) => row.userId);
+      const fieldB = roster
+        .filter((row) => row.teamId === game.teamBId && row.position === "FIELD")
+        .map((row) => row.userId);
+      const currentGoalkeepers = roster
+        .filter((row) => row.position === "GOALKEEPER")
+        .map((row) => row.userId);
+      if (fieldA.length === 0 || fieldA.length !== fieldB.length) {
+        throw new AppError("Há jogador de linha faltando. Substitua antes de finalizar a partida.");
       }
 
-      const teamSize = sideA.length;
+      const teamSize = fieldA.length;
       const isDraw = game.scoreA === game.scoreB;
       if (isDraw && !parsed.data.stayingSide) {
         throw new AppError("Empate! Escolha qual time permanece para a próxima partida.");
@@ -931,8 +935,8 @@ export async function finalizeMatchAction(
           : game.teamBId;
       const rotationWinnerTeamId = winnerSide === "A" ? game.teamAId : game.teamBId;
       const otherTeamId = winnerSide === "A" ? game.teamBId : game.teamAId;
-      const winnerIds = winnerSide === "A" ? sideA : sideB;
-      const loserIds = winnerSide === "A" ? sideB : sideA;
+      const winnerIds = winnerSide === "A" ? fieldA : fieldB;
+      const loserIds = winnerSide === "A" ? fieldB : fieldA;
 
       const snapshot = await tx
         .select({
@@ -956,7 +960,7 @@ export async function finalizeMatchAction(
         })
         .where(eq(games.id, game.id));
 
-      for (const userId of [...winnerIds, ...loserIds]) {
+      for (const userId of [...winnerIds, ...loserIds, ...currentGoalkeepers]) {
         await tx
           .update(attendances)
           .set({
@@ -974,9 +978,10 @@ export async function finalizeMatchAction(
       const present = await loadPresent(tx, game.eventId);
       const planPlayers = present.filter(
         (row) =>
-          row.rotationStatus === "WAITING" ||
-          winnerIds.includes(row.userId) ||
-          loserIds.includes(row.userId),
+          row.goalkeeperPreference !== "FIXED" &&
+          (row.rotationStatus === "WAITING" ||
+            winnerIds.includes(row.userId) ||
+            loserIds.includes(row.userId)),
       );
       const playersForPlan = toRachaPlayers(planPlayers).map((player) =>
         loserIds.includes(player.userId)
@@ -990,8 +995,8 @@ export async function finalizeMatchAction(
         winnerIds,
         loserIds,
         stayingSide: isDraw ? (parsed.data.stayingSide as "A" | "B") : undefined,
-        sideAIds: sideA,
-        sideBIds: sideB,
+        sideAIds: fieldA,
+        sideBIds: fieldB,
       });
 
       if (!plan.ok) {
@@ -1000,7 +1005,8 @@ export async function finalizeMatchAction(
             (row) =>
               row.rotationStatus === "WAITING" ||
               winnerIds.includes(row.userId) ||
-              loserIds.includes(row.userId),
+              loserIds.includes(row.userId) ||
+              currentGoalkeepers.includes(row.userId),
           )
           .sort(
             (a, b) =>
@@ -1129,37 +1135,56 @@ export async function finalizeMatchAction(
         })
         .returning({ id: games.id });
 
-      const nextSideIds = [...plan.sideA, ...plan.sideB];
-      const preferenceRows = await tx
-        .select({
-          userId: attendances.userId,
-          preference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
-        })
-        .from(attendances)
-        .innerJoin(users, eq(users.id, attendances.userId))
-        .where(
-          and(
-            eq(attendances.eventId, game.eventId),
-            inArray(attendances.userId, nextSideIds),
-          ),
+      const fixedGoalkeepers = present
+        .filter((row) => row.goalkeeperPreference === "FIXED")
+        .sort(
+          (a, b) =>
+            a.gamesPlayed - b.gamesPlayed ||
+            (a.queuePosition ?? 999) - (b.queuePosition ?? 999),
         );
-      const preferenceById = new Map(preferenceRows.map((row) => [row.userId, row.preference]));
-      const goalkeeperA = goalkeeperForSide(plan.sideA, preferenceById);
-      const goalkeeperB = goalkeeperForSide(plan.sideB, preferenceById);
+      const goalkeeperA = fixedGoalkeepers[0]?.userId ?? null;
+      const goalkeeperB = fixedGoalkeepers[1]?.userId ?? null;
+      const usedGoalkeepers = new Set([goalkeeperA, goalkeeperB].filter(Boolean));
+      const nextQueue = [
+        ...plan.queue,
+        ...fixedGoalkeepers
+          .filter((row) => !usedGoalkeepers.has(row.userId))
+          .map((row) => row.userId),
+      ];
+      const sideAPlaying = [...plan.sideA, ...(goalkeeperA ? [goalkeeperA] : [])];
+      const sideBPlaying = [...plan.sideB, ...(goalkeeperB ? [goalkeeperB] : [])];
 
       await tx.insert(gamePlayers).values([
         ...plan.sideA.map((userId) => ({
           gameId: next.id,
           teamId: nextTeamAId,
           userId,
-          position: userId === goalkeeperA ? ("GOALKEEPER" as const) : ("FIELD" as const),
+          position: "FIELD" as const,
         })),
         ...plan.sideB.map((userId) => ({
           gameId: next.id,
           teamId: nextTeamBId,
           userId,
-          position: userId === goalkeeperB ? ("GOALKEEPER" as const) : ("FIELD" as const),
+          position: "FIELD" as const,
         })),
+        ...(goalkeeperA
+          ? [{
+              gameId: next.id,
+              teamId: nextTeamAId,
+              userId: goalkeeperA,
+              role: "SUB" as const,
+              position: "GOALKEEPER" as const,
+            }]
+          : []),
+        ...(goalkeeperB
+          ? [{
+              gameId: next.id,
+              teamId: nextTeamBId,
+              userId: goalkeeperB,
+              role: "SUB" as const,
+              position: "GOALKEEPER" as const,
+            }]
+          : []),
       ]);
 
       const blocks = new Map<string, string | null>();
@@ -1184,8 +1209,8 @@ export async function finalizeMatchAction(
           status: "PLAYING",
           teamAId: nextTeamAId,
           teamBId: nextTeamBId,
-          playerAIds: plan.sideA,
-          playerBIds: plan.sideB,
+          playerAIds: sideAPlaying,
+          playerBIds: sideBPlaying,
           currentGameId: next.id,
           updatedAt: new Date(),
         })
@@ -1193,7 +1218,7 @@ export async function finalizeMatchAction(
           and(eq(rotationCourts.sessionId, draw.id), eq(rotationCourts.number, game.court)),
         );
 
-      await applyLineup(tx, game.eventId, plan.sideA, plan.sideB, plan.queue, blocks);
+      await applyLineup(tx, game.eventId, sideAPlaying, sideBPlaying, nextQueue, blocks);
       await renumberQueue(tx, game.eventId);
       await tx
         .update(games)
@@ -1913,55 +1938,74 @@ export async function mixNextMatchAction(
       }
 
       const players = await tx
-        .select({ userId: gamePlayers.userId, teamId: gamePlayers.teamId })
+        .select({
+          userId: gamePlayers.userId,
+          teamId: gamePlayers.teamId,
+          position: gamePlayers.position,
+          role: gamePlayers.role,
+          temporaryGoalkeeper: gamePlayers.temporaryGoalkeeper,
+        })
         .from(gamePlayers)
         .where(and(eq(gamePlayers.gameId, game.id), isNull(gamePlayers.leftAt)));
-      const sideA = players.filter((row) => row.teamId === game.teamAId).map((row) => row.userId);
-      const sideB = players.filter((row) => row.teamId === game.teamBId).map((row) => row.userId);
-      if (sideA.length === 0 || sideA.length !== sideB.length) {
-        throw new AppError("Os dois times precisam ter o mesmo número de jogadores.");
+      const fieldA = players
+        .filter((row) => row.teamId === game.teamAId && row.position === "FIELD")
+        .map((row) => row.userId);
+      const fieldB = players
+        .filter((row) => row.teamId === game.teamBId && row.position === "FIELD")
+        .map((row) => row.userId);
+      const goalkeepersA = players.filter(
+        (row) => row.teamId === game.teamAId && row.position === "GOALKEEPER",
+      );
+      const goalkeepersB = players.filter(
+        (row) => row.teamId === game.teamBId && row.position === "GOALKEEPER",
+      );
+      if (fieldA.length === 0 || fieldA.length !== fieldB.length) {
+        throw new AppError("Os dois times precisam ter o mesmo número de jogadores de linha.");
       }
 
-      const shuffled = shuffle([...sideA, ...sideB]);
-      const teamSize = sideA.length;
+      const shuffled = shuffle([...fieldA, ...fieldB]);
+      const teamSize = fieldA.length;
       const nextA = shuffled.slice(0, teamSize);
       const nextB = shuffled.slice(teamSize);
 
       await tx.delete(gamePlayers).where(eq(gamePlayers.gameId, game.id));
-      const preferenceRows = await tx
-        .select({
-          userId: attendances.userId,
-          preference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
-        })
-        .from(attendances)
-        .innerJoin(users, eq(users.id, attendances.userId))
-        .where(
-          and(
-            eq(attendances.eventId, game.eventId),
-            inArray(attendances.userId, [...nextA, ...nextB]),
-          ),
-        );
-      const preferenceMap = new Map(preferenceRows.map((row) => [row.userId, row.preference]));
-      const goalkeeperA = nextA.find((userId) => preferenceMap.get(userId) === "FIXED") ?? null;
-      const goalkeeperB = nextB.find((userId) => preferenceMap.get(userId) === "FIXED") ?? null;
       await tx.insert(gamePlayers).values([
         ...nextA.map((userId) => ({
           gameId: game.id,
           teamId: game.teamAId,
           userId,
-          position: userId === goalkeeperA ? ("GOALKEEPER" as const) : ("FIELD" as const),
+          position: "FIELD" as const,
         })),
         ...nextB.map((userId) => ({
           gameId: game.id,
           teamId: game.teamBId,
           userId,
-          position: userId === goalkeeperB ? ("GOALKEEPER" as const) : ("FIELD" as const),
+          position: "FIELD" as const,
+        })),
+        ...goalkeepersA.map((row) => ({
+          gameId: game.id,
+          teamId: game.teamAId,
+          userId: row.userId,
+          role: row.role,
+          position: "GOALKEEPER" as const,
+          temporaryGoalkeeper: row.temporaryGoalkeeper,
+        })),
+        ...goalkeepersB.map((row) => ({
+          gameId: game.id,
+          teamId: game.teamBId,
+          userId: row.userId,
+          role: row.role,
+          position: "GOALKEEPER" as const,
+          temporaryGoalkeeper: row.temporaryGoalkeeper,
         })),
       ]);
 
+      const rotationA = [...nextA, ...goalkeepersA.map((row) => row.userId)];
+      const rotationB = [...nextB, ...goalkeepersB.map((row) => row.userId)];
+
       await tx
         .update(rotationCourts)
-        .set({ playerAIds: nextA, playerBIds: nextB, updatedAt: new Date() })
+        .set({ playerAIds: rotationA, playerBIds: rotationB, updatedAt: new Date() })
         .where(
           and(
             eq(rotationCourts.sessionId, initial.drawId),
@@ -2160,7 +2204,7 @@ export async function updateRachaTeamSizeAction(
   if (!parsed.success) return fail(firstZodMessage(parsed.error));
 
   const actor = await getSessionUser();
-  if (!actor || actor.role !== "ADMIN") return fail("A��o restrita a administradores.");
+  if (!actor || actor.role !== "ADMIN") return fail("Ação restrita a administradores.");
 
   try {
     await db
@@ -2177,7 +2221,7 @@ export async function updateRachaTeamSizeAction(
     });
 
     revalidatePath("/", "layout");
-    return success(`Times com ${parsed.data.teamSize} jogadores. Vale para o pr�ximo jogo.`);
+    return success(`Times com ${parsed.data.teamSize} jogadores de linha. Vale para o próximo jogo.`);
   } catch (error) {
     return actionFailure(error);
   }
@@ -2191,7 +2235,7 @@ export async function setGoalkeeperAction(
   if (!parsed.success) return fail(firstZodMessage(parsed.error));
 
   const actor = await getSessionUser();
-  if (!actor || actor.role !== "ADMIN") return fail("A��o restrita a administradores.");
+  if (!actor || actor.role !== "ADMIN") return fail("Ação restrita a administradores.");
 
   try {
     const message = await db.transaction(async (tx) => {
@@ -2201,60 +2245,185 @@ export async function setGoalkeeperAction(
         .where(eq(games.id, parsed.data.gameId))
         .for("update")
         .limit(1);
-      if (!game) throw new AppError("Partida n�o encontrada.");
+      if (!game) throw new AppError("Partida não encontrada.");
       if (game.teamAId !== parsed.data.teamId && game.teamBId !== parsed.data.teamId) {
-        throw new AppError("Time n�o pertence a esta partida.");
+        throw new AppError("Time não pertence a esta partida.");
       }
 
       const roster = await tx
-        .select({ userId: gamePlayers.userId, joinedAt: gamePlayers.enteredAt })
+        .select({
+          userId: gamePlayers.userId,
+          position: gamePlayers.position,
+          role: gamePlayers.role,
+          replacedUserId: gamePlayers.replacedUserId,
+        })
         .from(gamePlayers)
-        .where(and(eq(gamePlayers.gameId, game.id), eq(gamePlayers.teamId, parsed.data.teamId), isNull(gamePlayers.leftAt)));
+        .where(
+          and(
+            eq(gamePlayers.gameId, game.id),
+            eq(gamePlayers.teamId, parsed.data.teamId),
+            isNull(gamePlayers.leftAt),
+          ),
+        );
 
-      if (parsed.data.userId && !roster.some((row) => row.userId === parsed.data.userId)) {
-        throw new AppError("O goleiro precisa estar escalado neste time.");
-      }
+      const extraGoalkeeper = roster.find(
+        (row) =>
+          row.position === "GOALKEEPER" &&
+          row.role === "SUB" &&
+          row.replacedUserId === null,
+      );
 
-      let temporary = false;
-      if (parsed.data.userId) {
-        const [preference] = await tx
-          .select({
-            value: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
-          })
-          .from(attendances)
-          .innerJoin(users, eq(users.id, attendances.userId))
+      const syncCourtPlayers = async (userId: string, add: boolean) => {
+        const [court] = await tx
+          .select()
+          .from(rotationCourts)
           .where(
             and(
-              eq(attendances.eventId, game.eventId),
-              eq(attendances.userId, parsed.data.userId),
+              eq(rotationCourts.sessionId, game.drawId),
+              eq(rotationCourts.number, game.court),
             ),
           )
           .limit(1);
-        temporary = preference?.value !== "FIXED";
+        if (!court) return;
+        const isTeamA = game.teamAId === parsed.data.teamId;
+        const ids = new Set<string>(
+          ((isTeamA ? court.playerAIds : court.playerBIds) as string[] | null) ?? [],
+        );
+        if (add) ids.add(userId);
+        else ids.delete(userId);
+        await tx
+          .update(rotationCourts)
+          .set(
+            isTeamA
+              ? { playerAIds: [...ids], updatedAt: new Date() }
+              : { playerBIds: [...ids], updatedAt: new Date() },
+          )
+          .where(eq(rotationCourts.id, court.id));
+      };
+
+      const removeExtraGoalkeeper = async (userId: string) => {
+        await tx
+          .delete(gamePlayers)
+          .where(
+            and(
+              eq(gamePlayers.gameId, game.id),
+              eq(gamePlayers.teamId, parsed.data.teamId),
+              eq(gamePlayers.userId, userId),
+            ),
+          );
+        await appendPlayersToQueue(tx, game.eventId, [userId]);
+        await syncCourtPlayers(userId, false);
+      };
+
+      if (!parsed.data.userId) {
+        if (extraGoalkeeper) await removeExtraGoalkeeper(extraGoalkeeper.userId);
+        await tx
+          .update(gamePlayers)
+          .set({ position: "FIELD", temporaryGoalkeeper: false })
+          .where(and(eq(gamePlayers.gameId, game.id), eq(gamePlayers.teamId, parsed.data.teamId)));
+        return "Goleiro removido do time.";
       }
+
+      const targetUserId = parsed.data.userId;
+      const [preference] = await tx
+        .select({
+          value: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
+          active: users.active,
+          status: attendances.status,
+          rotationStatus: attendances.rotationStatus,
+        })
+        .from(attendances)
+        .innerJoin(users, eq(users.id, attendances.userId))
+        .where(
+          and(
+            eq(attendances.eventId, game.eventId),
+            eq(attendances.userId, targetUserId),
+          ),
+        )
+        .limit(1);
+      if (!preference || !preference.active || preference.status !== "CONFIRMED") {
+        throw new AppError("O goleiro precisa estar confirmado no evento.");
+      }
+      if (preference.rotationStatus === "LEFT") {
+        throw new AppError("O goleiro escolhido já saiu do racha.");
+      }
+
+      const inRoster = roster.some((row) => row.userId === targetUserId);
+
+      if (inRoster) {
+        if (extraGoalkeeper && extraGoalkeeper.userId !== targetUserId) {
+          await removeExtraGoalkeeper(extraGoalkeeper.userId);
+        }
+        await tx
+          .update(gamePlayers)
+          .set({ position: "FIELD", temporaryGoalkeeper: false })
+          .where(and(eq(gamePlayers.gameId, game.id), eq(gamePlayers.teamId, parsed.data.teamId)));
+        await tx
+          .update(gamePlayers)
+          .set({
+            position: "GOALKEEPER",
+            temporaryGoalkeeper: preference.value !== "FIXED",
+          })
+          .where(
+            and(
+              eq(gamePlayers.gameId, game.id),
+              eq(gamePlayers.teamId, parsed.data.teamId),
+              eq(gamePlayers.userId, targetUserId),
+            ),
+          );
+        return "Goleiro definido.";
+      }
+
+      const [activeElsewhere] = await tx
+        .select({ id: gamePlayers.id })
+        .from(gamePlayers)
+        .innerJoin(games, eq(games.id, gamePlayers.gameId))
+        .where(
+          and(
+            eq(gamePlayers.userId, targetUserId),
+            eq(games.drawId, game.drawId),
+            sql`${games.status} in ('IN_PROGRESS', 'NOT_STARTED')`,
+            isNull(gamePlayers.leftAt),
+          ),
+        )
+        .limit(1);
+      if (activeElsewhere) {
+        throw new AppError("Este jogador já está em outra partida.");
+      }
+
+      if (extraGoalkeeper) await removeExtraGoalkeeper(extraGoalkeeper.userId);
 
       await tx
         .update(gamePlayers)
         .set({ position: "FIELD", temporaryGoalkeeper: false })
         .where(and(eq(gamePlayers.gameId, game.id), eq(gamePlayers.teamId, parsed.data.teamId)));
 
-      if (parsed.data.userId) {
-        await tx
-          .update(gamePlayers)
-          .set({
-            position: "GOALKEEPER",
-            temporaryGoalkeeper: temporary,
-          })
-          .where(
-            and(
-              eq(gamePlayers.gameId, game.id),
-              eq(gamePlayers.teamId, parsed.data.teamId),
-              eq(gamePlayers.userId, parsed.data.userId),
-            ),
-          );
-      }
+      await tx.insert(gamePlayers).values({
+        gameId: game.id,
+        teamId: parsed.data.teamId,
+        userId: targetUserId,
+        role: "SUB",
+        position: "GOALKEEPER",
+        temporaryGoalkeeper: preference.value !== "FIXED",
+        replacedUserId: null,
+      });
+      await tx
+        .update(attendances)
+        .set({
+          rotationStatus: "PLAYING",
+          queuePosition: null,
+          queueTeamId: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(attendances.eventId, game.eventId),
+            eq(attendances.userId, targetUserId),
+          ),
+        );
+      await syncCourtPlayers(targetUserId, true);
 
-      return parsed.data.userId ? "Goleiro definido." : "Goleiro removido do time.";
+      return "Goleiro adicionado ao time.";
     });
 
     await recordAudit({

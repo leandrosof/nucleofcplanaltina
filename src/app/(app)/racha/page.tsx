@@ -195,7 +195,7 @@ export default async function RachaPage({
                     <div className="grid max-w-[420px] gap-3 sm:grid-cols-2">
                       <div>
                         <Label htmlFor="teamSize" required>
-                          Jogadores por time
+                          Jogadores de linha por time
                         </Label>
                         <Select
                           id="teamSize"
@@ -225,7 +225,7 @@ export default async function RachaPage({
                       </div>
                     </div>
                     <p className="text-xs text-muted">
-                      O sistema usa os jogadores confirmados da lista e monta a primeira partida sozinho.
+                      O sistema usa os jogadores confirmados e monta a primeira partida sozinho. Cada time recebe também 1 goleiro (fixo ou escolhido manualmente).
                     </p>
                   </ActionForm>
                 ) : (
@@ -354,7 +354,7 @@ export default async function RachaPage({
                 <Card>
                   <CardBody className="flex flex-wrap items-end gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-ink">Tamanho do time</p>
+                      <p className="text-sm font-semibold text-ink">Jogadores de linha</p>
                       <p className="text-xs text-muted">Vale para o próximo jogo. O jogo em andamento usa substituições.</p>
                     </div>
                     <div className="ml-auto">
@@ -366,7 +366,7 @@ export default async function RachaPage({
                         size="sm"
                       >
                         <Label htmlFor="racha-team-size" className="sr-only">
-                          Jogadores por time
+                          Jogadores de linha por time
                         </Label>
                         <Select
                           id="racha-team-size"
@@ -546,11 +546,25 @@ export default async function RachaPage({
                                 }
                               >
                                 <option value="">Sem goleiro definido</option>
-                                {team.players.map((player) => (
-                                  <option key={player.userId} value={player.userId}>
-                                    {player.name}
-                                  </option>
-                                ))}
+                                <optgroup label="No time">
+                                  {team.players.map((player) => (
+                                    <option key={player.userId} value={player.userId}>
+                                      {player.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                                <optgroup label="Da fila (entra só no gol)">
+                                  {view.queue
+                                    .filter(
+                                      (queued) =>
+                                        !team.players.some((player) => player.userId === queued.userId),
+                                    )
+                                    .map((queued) => (
+                                      <option key={queued.userId} value={queued.userId}>
+                                        {queued.name}
+                                      </option>
+                                    ))}
+                                </optgroup>
                               </Select>
                             </ActionForm>
                           ))}

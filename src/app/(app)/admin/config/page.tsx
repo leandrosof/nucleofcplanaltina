@@ -151,7 +151,7 @@ export default async function AdminSettingsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor="defaultTeamSize" required>
-                  Jogadores por time (padrão)
+                  Jogadores de linha por time (padrão)
                 </Label>
                 <Select id="defaultTeamSize" name="defaultTeamSize" defaultValue={String(settings.defaultTeamSize)}>
                   {TEAM_SIZE_OPTIONS.map((size) => (

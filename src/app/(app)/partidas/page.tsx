@@ -273,7 +273,7 @@ export default async function MatchesPage({
                       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: team.hex }} />
                       {team.name}
                     </CardTitle>
-                    <Badge>{team.players.length} jogadores</Badge>
+                    <Badge>{fieldPlayers.length} de linha</Badge>
                   </CardHeader>
                   <CardBody className="space-y-2 pt-2">
                     <div

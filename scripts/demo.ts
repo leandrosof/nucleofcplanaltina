@@ -53,8 +53,8 @@ async function run() {
 
     const people = [
       { name: "Rafael Moreira", email: "admin@arena.local", role: "ADMIN" as const, nickname: "Rafa" },
-      { name: "Ana Souza", email: "ana@arena.local", role: "PLAYER" as const, nickname: "Aninha" },
-      { name: "Bruno Lima", email: "bruno@arena.local", role: "PLAYER" as const, nickname: "Brunão" },
+      { name: "Ana Souza", email: "ana@arena.local", role: "PLAYER" as const, nickname: "Aninha", memberType: "MEMBER" as const, goalkeeperPreference: "FIXED" as const },
+      { name: "Bruno Lima", email: "bruno@arena.local", role: "PLAYER" as const, nickname: "Brunão", memberType: "MEMBER" as const, goalkeeperPreference: "FIXED" as const },
       { name: "Carla Dias", email: "carla@arena.local", role: "PLAYER" as const, nickname: "Cacá" },
       { name: "Diego Alves", email: "diego@arena.local", role: "PLAYER" as const, nickname: "Dieguito" },
       { name: "Eduarda Rocha", email: "eduarda@arena.local", role: "PLAYER" as const, nickname: "Duda" },
@@ -64,8 +64,8 @@ async function run() {
       { name: "Isabela Freitas", email: "isabela@arena.local", role: "PLAYER" as const, nickname: "Isa" },
       { name: "João Pedro", email: "joao@arena.local", role: "PLAYER" as const, nickname: "JP" },
       { name: "Larissa Melo", email: "larissa@arena.local", role: "PLAYER" as const, nickname: "Lari" },
-      { name: "Marcos Silva", email: "marcos@arena.local", role: "PLAYER" as const, nickname: "Marcão" },
-      { name: "Natália Costa", email: "natalia@arena.local", role: "PLAYER" as const, nickname: "Naty" },
+      { name: "Marcos Silva", email: "marcos@arena.local", role: "PLAYER" as const, nickname: "Marcão", memberType: "GUEST" as const },
+      { name: "Natália Costa", email: "natalia@arena.local", role: "PLAYER" as const, nickname: "Naty", memberType: "GUEST" as const },
     ];
 
     const insertedUsers = await db
@@ -111,7 +111,7 @@ async function run() {
         startsAt: new Date(nextSaturday.getTime()),
         venueName: "Arena Praia Clube",
         address: "Rua das Palmeiras, 240 · Quadra 2",
-        maxPlayers: 12,
+        maxPlayers: 16,
         notes: "Chegar 15 minutos antes para aquecer. Levem colete claro e escuro.",
         createdById: admin.id,
       })
@@ -131,8 +131,8 @@ async function run() {
       })
       .returning({ id: schema.events.id });
 
-    const upcomingConfirmed = insertedUsers.slice(0, 12);
-    const upcomingWaitlist = [insertedUsers[12]];
+    const upcomingConfirmed = [...insertedUsers.slice(0, 12), ...insertedUsers.slice(14, 16)];
+    const upcomingWaitlist = insertedUsers.slice(12, 14);
 
     await db.insert(schema.attendances).values([
       ...upcomingConfirmed.map((user, index) => ({

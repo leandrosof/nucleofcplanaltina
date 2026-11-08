@@ -32,7 +32,7 @@
    - Obrigatório no cadastro e editável pelo admin.
    - Badge "Membro"/"Convidado" no painel admin, lista de jogadores, presenças, perfil e cards de time.
    - **Ranking único**, com selo e filtro "todos / membros / convidados".
-4. **Tamanho do time: 6 a 11**, editável durante o evento.
+4. **Tamanho do time: 6 a 11 jogadores de linha**, editável durante o evento. O goleiro é uma vaga adicional.
    - A mudança vale para o **próximo jogo**; o jogo em andamento usa substituições.
 5. **Nomes dos times**: `Time 1`, `Time 2`, `Time 3`... por evento.
    - Reinicia em `Time 1` a cada evento/sessão.

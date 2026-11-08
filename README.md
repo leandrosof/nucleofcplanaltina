@@ -117,7 +117,7 @@ basta alterar `DATABASE_URL` em `.env.local`.
 
 ### Racha (lista única, times e rotação)
 - **Uma lista única de jogadores** por evento: presentes, fila, em quadra e quem saiu.
-- O administrador escolhe o formato (**6 a 11** por time) e clica em **“Iniciar racha”**:
+- O administrador escolhe o formato (**6 a 11 jogadores de linha por time, mais 1 goleiro**) e clica em **“Iniciar racha”**:
   o sistema monta os dois primeiros times automaticamente e deixa o restante na fila.
 - A partida tem placar ao vivo (+1/−1 ou digitar o placar) e **“Finalizar partida”**.
 - Ao finalizar, a rotação é **automática**: o vencedor fica, o perdedor vai para o fim da fila e
@@ -132,6 +132,7 @@ basta alterar `DATABASE_URL` em `.env.local`.
 - Times nomeados `Time 1`, `Time 2`... com coletes **azul** e **vermelho**.
 
 ### Goleiros
+- O goleiro é uma **vaga extra**: 8 de linha + 1 goleiro = 9 no time.
 - Goleiros fixos são distribuídos um por time no sorteio.
 - O admin pode definir ou trocar o goleiro de cada time manualmente.
 - Goleiro temporário não fica preso ao time: após a partida volta à fila normal.

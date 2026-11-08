@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../client";
 import { attendances, drawTeams, draws, gamePlayers, games, rotationCourts, users } from "../schema";
 import type { Draw, DrawTeam } from "../schema";
@@ -14,6 +14,7 @@ export type RachaPlayerView = {
   queueTeamId: string | null;
   gamesPlayed: number;
   checkedInAt: Date | null;
+  goalkeeperPreference: "FIXED" | "FIELD" | "ANY";
 };
 
 export type RachaGamePlayer = {
@@ -86,6 +87,7 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
       queueTeamId: attendances.queueTeamId,
       gamesPlayed: attendances.gamesPlayed,
       checkedInAt: attendances.checkedInAt,
+      goalkeeperPreference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
     })
     .from(attendances)
     .innerJoin(users, eq(users.id, attendances.userId))
@@ -246,7 +248,11 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
     .sort((a, b) => b.sequence - a.sequence);
 
   const teamSize = session.teamSize;
-  const missing = currentGame ? 0 : Math.max(0, teamSize * 2 - present.filter((p) => p.rotationStatus !== "LEFT").length);
+  const fieldAvailable = present.filter(
+    (player) =>
+      player.rotationStatus !== "LEFT" && player.goalkeeperPreference !== "FIXED",
+  ).length;
+  const missing = currentGame ? 0 : Math.max(0, teamSize * 2 - fieldAvailable);
 
   const latest = history[0] ?? null;
 
