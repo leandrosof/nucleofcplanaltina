@@ -1,3 +1,4 @@
+import { Hand } from "lucide-react";
 import { readableTextColor, teamVisualByColor } from "@/lib/teams";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +15,20 @@ export type TeamCardTeam = {
   }[];
 };
 
+function MemberTag({ memberType }: { memberType?: "MEMBER" | "GUEST" }) {
+  if (!memberType) return null;
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+        memberType === "GUEST" ? "bg-ink/5 text-muted" : "bg-brand/10 text-brand",
+      )}
+    >
+      {memberType === "GUEST" ? "Convidado" : "Membro"}
+    </span>
+  );
+}
+
 export function TeamCard({
   team,
   teamSize,
@@ -29,6 +44,8 @@ export function TeamCard({
 }) {
   const visual = teamVisualByColor(team.color);
   const foreground = readableTextColor(visual.hex);
+  const goalkeeper = team.players.find((player) => player.position === "GOALKEEPER") ?? null;
+  const fieldPlayers = team.players.filter((player) => player !== goalkeeper);
 
   return (
     <div
@@ -40,7 +57,6 @@ export function TeamCard({
         className,
       )}
     >
-      {/* Top subtle glow bar */}
       <div
         className="h-1.5 w-full shadow-[0_1px_6px]"
         style={{
@@ -74,8 +90,35 @@ export function TeamCard({
           {teamSize ? `/${teamSize}` : ""}
         </span>
       </div>
+
+      <div
+        className={cn(
+          "flex items-center gap-2 rounded-xl border",
+          compact ? "mx-2 mt-2 px-2 py-1.5" : "mx-3 mt-2.5 px-2.5 py-2",
+          goalkeeper
+            ? "border-[rgba(245,185,66,0.45)] bg-[rgba(245,185,66,0.12)]"
+            : "border-dashed border-line bg-surface-2/40",
+        )}
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[rgba(245,185,66,0.16)] text-warning">
+          <Hand className="h-4 w-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-warning">Goleiro</p>
+          <p className={cn("truncate font-semibold text-ink", compact ? "text-sm" : "text-sm")}>
+            {goalkeeper ? goalkeeper.name : "Pendente"}
+          </p>
+        </div>
+        {goalkeeper?.temporaryGoalkeeper ? (
+          <span className="shrink-0 rounded bg-[rgba(245,185,66,0.18)] px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-warning">
+            Temporário
+          </span>
+        ) : null}
+        <MemberTag memberType={goalkeeper?.memberType} />
+      </div>
+
       <ol className={cn(compact ? "space-y-1 px-2 py-2" : "space-y-1.5 px-3 py-3")}>
-        {team.players.map((player, index) => (
+        {fieldPlayers.map((player, index) => (
           <li
             key={player.userId}
             className={cn(
@@ -87,27 +130,11 @@ export function TeamCard({
               {index + 1}
             </span>
             <span className="truncate">{player.name}</span>
-            {player.memberType ? (
-              <span
-                className={cn(
-                  "shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider",
-                  player.memberType === "GUEST"
-                    ? "bg-ink/5 text-muted"
-                    : "bg-brand/10 text-brand",
-                )}
-              >
-                {player.memberType === "GUEST" ? "Convidado" : "Membro"}
-              </span>
-            ) : null}
-            {player.position === "GOALKEEPER" ? (
-              <span className="shrink-0 rounded bg-[rgba(245,185,66,0.14)] px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-warning">
-                {player.temporaryGoalkeeper ? "Gol temp." : "Gol"}
-              </span>
-            ) : null}
+            <MemberTag memberType={player.memberType} />
           </li>
         ))}
-        {team.players.length === 0 ? (
-          <li className="px-2 py-3 text-center text-xs text-muted">Sem jogadores escalados</li>
+        {fieldPlayers.length === 0 ? (
+          <li className="px-2 py-3 text-center text-xs text-muted">Sem jogadores de linha escalados</li>
         ) : null}
       </ol>
     </div>

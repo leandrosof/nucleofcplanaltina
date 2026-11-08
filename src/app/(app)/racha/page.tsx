@@ -129,6 +129,12 @@ export default async function RachaPage({
   const onCourtIds = new Set(
     game ? [...game.teamAPlayers, ...game.teamBPlayers].map((player) => player.userId) : [],
   );
+  const goalkeeperPending = Boolean(
+    game &&
+      [game.teamAPlayers, game.teamBPlayers].some(
+        (players) => !players.some((player) => player.position === "GOALKEEPER"),
+      ),
+  );
 
   return (
     <div>
@@ -513,7 +519,11 @@ export default async function RachaPage({
                     </div>
 
                     {isAdmin ? (
-                      <Disclosure title="Goleiros" subtitle="Escolha quem fica no gol em cada time">
+                      <Disclosure
+                        title="Goleiros"
+                        subtitle="Escolha quem fica no gol em cada time"
+                        defaultOpen={goalkeeperPending}
+                      >
                         <div className="grid gap-3 sm:grid-cols-2">
                           {[
                             { id: game.teamAId, name: game.teamAName, players: game.teamAPlayers },

@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock,
   Flame,
+  Hand,
   History,
   Minus,
   Plus,
@@ -262,39 +263,69 @@ export default async function MatchesPage({
             {[
               { name: game.teamAName, hex: teamAVisual.hex, players: game.teamAPlayers },
               { name: game.teamBName, hex: teamBVisual.hex, players: game.teamBPlayers },
-            ].map((team) => (
-              <Card key={team.name}>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: team.hex }} />
-                    {team.name}
-                  </CardTitle>
-                  <Badge>{team.players.length} jogadores</Badge>
-                </CardHeader>
-                <CardBody className="pt-2">
-                  <ul className="flex flex-wrap gap-1.5">
-                    {team.players.map((player) => (
-                      <li
-                        key={player.userId}
-                        className="flex items-center gap-1.5 rounded-full border border-line bg-surface-2/60 px-2.5 py-1 text-xs text-ink/90"
-                      >
-                        {player.name}
-                        {player.memberType === "GUEST" ? (
-                          <span className="rounded bg-ink/5 px-1 text-[9px] font-bold uppercase tracking-wider text-muted">
-                            Convidado
-                          </span>
-                        ) : null}
-                        {player.position === "GOALKEEPER" ? (
-                          <span className="rounded bg-[rgba(245,185,66,0.14)] px-1 text-[9px] font-bold uppercase tracking-wider text-warning">
-                            {player.temporaryGoalkeeper ? "Gol temp." : "Gol"}
-                          </span>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                </CardBody>
-              </Card>
-            ))}
+            ].map((team) => {
+              const goalkeeper = team.players.find((player) => player.position === "GOALKEEPER");
+              const fieldPlayers = team.players.filter((player) => player.position !== "GOALKEEPER");
+              return (
+                <Card key={team.name}>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: team.hex }} />
+                      {team.name}
+                    </CardTitle>
+                    <Badge>{team.players.length} jogadores</Badge>
+                  </CardHeader>
+                  <CardBody className="space-y-2 pt-2">
+                    <div
+                      className={
+                        goalkeeper
+                          ? "flex items-center gap-2 rounded-xl border border-[rgba(245,185,66,0.45)] bg-[rgba(245,185,66,0.12)] px-2.5 py-2"
+                          : "flex items-center gap-2 rounded-xl border border-dashed border-line bg-surface-2/40 px-2.5 py-2"
+                      }
+                    >
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[rgba(245,185,66,0.16)] text-warning">
+                        <Hand className="h-4 w-4" aria-hidden />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-warning">Goleiro</p>
+                        <p className="truncate text-sm font-semibold text-ink">
+                          {goalkeeper ? goalkeeper.name : "Pendente"}
+                        </p>
+                      </div>
+                      {goalkeeper?.temporaryGoalkeeper ? (
+                        <span className="rounded bg-[rgba(245,185,66,0.18)] px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-warning">
+                          Temporário
+                        </span>
+                      ) : null}
+                      {goalkeeper?.memberType === "GUEST" ? (
+                        <span className="rounded bg-ink/5 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted">
+                          Convidado
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <ul className="flex flex-wrap gap-1.5">
+                      {fieldPlayers.map((player) => (
+                        <li
+                          key={player.userId}
+                          className="flex items-center gap-1.5 rounded-full border border-line bg-surface-2/60 px-2.5 py-1 text-xs text-ink/90"
+                        >
+                          {player.name}
+                          {player.memberType === "GUEST" ? (
+                            <span className="rounded bg-ink/5 px-1 text-[9px] font-bold uppercase tracking-wider text-muted">
+                              Convidado
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                    {fieldPlayers.length === 0 ? (
+                      <p className="text-xs text-muted">Sem jogadores de linha escalados.</p>
+                    ) : null}
+                  </CardBody>
+                </Card>
+              );
+            })}
           </div>
 
           {isAdmin && isLive && game.source !== "RACHA" ? (
