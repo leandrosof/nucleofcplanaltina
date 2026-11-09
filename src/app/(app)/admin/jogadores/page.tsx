@@ -93,13 +93,9 @@ export default async function AdminPlayersPage({
                         <MemberBadge memberType={player.memberType} />
                         <GoalkeeperBadge preference={player.goalkeeperPreference} />
                       </div>
-                      {player.emailVerifiedAt ? (
-                        <Badge tone={player.active ? "success" : "danger"}>
-                          {player.active ? "Ativo" : "Inativo"}
-                        </Badge>
-                      ) : (
-                        <Badge tone="warning">E-mail pendente</Badge>
-                      )}
+                      <Badge tone={player.active ? "success" : "danger"}>
+                        {player.active ? "Ativo" : "Inativo"}
+                      </Badge>
                     </div>
                   </div>
 

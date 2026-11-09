@@ -23,8 +23,8 @@ export default async function RegisterPage({
         Criar minha conta
       </h1>
       <p className="mt-2 text-sm leading-relaxed text-muted">
-        Cada jogador tem a própria conta para confirmar presença e acompanhar suas estatísticas. Depois
-        do cadastro, confirme seu e-mail para ativar o acesso.
+        Cada jogador tem a própria conta para confirmar presença e acompanhar suas estatísticas. Crie
+        sua conta e já comece a usar.
       </p>
 
       <div className="mt-5">

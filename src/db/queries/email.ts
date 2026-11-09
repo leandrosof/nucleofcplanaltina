@@ -1,13 +1,9 @@
-import { and, asc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "../client";
 import { attendances, users } from "../schema";
 
 export async function listEmailRecipients(excludeUserId?: string) {
-  const filters = [
-    eq(users.active, true),
-    isNotNull(users.emailVerifiedAt),
-    eq(users.emailNotifications, true),
-  ];
+  const filters = [eq(users.active, true), eq(users.emailNotifications, true)];
   if (excludeUserId) filters.push(ne(users.id, excludeUserId));
 
   return db
@@ -27,7 +23,6 @@ export async function listEventEmailRecipients(eventId: string) {
         eq(attendances.eventId, eventId),
         inArray(attendances.status, ["CONFIRMED", "WAITLIST"]),
         eq(users.active, true),
-        isNotNull(users.emailVerifiedAt),
       ),
     )
     .orderBy(asc(users.name));
