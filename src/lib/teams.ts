@@ -75,6 +75,20 @@ export function teamVisualByIndex(index: number): TeamVisual {
   return teamVisualForIndex(index);
 }
 
+export type GoalkeeperPreference = "FIXED" | "FIELD" | "ANY";
+
+export const GOALKEEPER_PREFERENCE_LABELS: Record<GoalkeeperPreference, string> = {
+  FIXED: "GOL",
+  ANY: "GL",
+  FIELD: "LIN",
+};
+
+export function goalkeeperPreferenceLabel(
+  preference: GoalkeeperPreference | null | undefined,
+): string {
+  return preference ? GOALKEEPER_PREFERENCE_LABELS[preference] : "LIN";
+}
+
 export const TEAM_SIZE_OPTIONS = [6, 7, 8, 9, 10, 11] as const;
 export const MAX_PLAYERS_LIMIT = 200;
 export const MIN_PLAYERS_LIMIT = 2;

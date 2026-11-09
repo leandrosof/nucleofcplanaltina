@@ -57,7 +57,7 @@ import { getRachaView } from "@/db/queries/racha";
 import { requireUser } from "@/lib/auth";
 import { chunkQueue } from "@/lib/racha";
 import { getSettings } from "@/lib/settings";
-import { TEAM_SIZE_OPTIONS, teamVisualForIndex } from "@/lib/teams";
+import { TEAM_SIZE_OPTIONS, goalkeeperPreferenceLabel, teamVisualForIndex } from "@/lib/teams";
 import { formatDateTime, formatTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
@@ -549,7 +549,7 @@ export default async function RachaPage({
                                 <optgroup label="No time">
                                   {team.players.map((player) => (
                                     <option key={player.userId} value={player.userId}>
-                                      {player.name}
+                                      {goalkeeperPreferenceLabel(player.goalkeeperPreference)} · {player.name}
                                     </option>
                                   ))}
                                 </optgroup>
@@ -561,7 +561,7 @@ export default async function RachaPage({
                                     )
                                     .map((queued) => (
                                       <option key={queued.userId} value={queued.userId}>
-                                        {queued.name}
+                                        {goalkeeperPreferenceLabel(queued.goalkeeperPreference)} · {queued.name}
                                       </option>
                                     ))}
                                 </optgroup>

@@ -31,7 +31,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { getGameDetail, listLiveGames, listRecentFinishedGames } from "@/db/queries/games";
 import { requireUser } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
-import { teamVisualByColor } from "@/lib/teams";
+import { goalkeeperPreferenceLabel, teamVisualByColor } from "@/lib/teams";
 import { formatDateShort, formatDateTime, formatTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
@@ -289,6 +289,11 @@ export default async function MatchesPage({
                       <div className="min-w-0 flex-1">
                         <p className="text-[9px] font-bold uppercase tracking-wider text-warning">Goleiro</p>
                         <p className="truncate text-sm font-semibold text-ink">
+                          {goalkeeper ? (
+                            <span className="mr-1 rounded bg-[rgba(245,185,66,0.2)] px-1 text-[9px] font-bold uppercase tracking-wider text-warning">
+                              {goalkeeperPreferenceLabel(goalkeeper.goalkeeperPreference)}
+                            </span>
+                          ) : null}
                           {goalkeeper ? goalkeeper.name : "Pendente"}
                         </p>
                       </div>
@@ -310,6 +315,9 @@ export default async function MatchesPage({
                           key={player.userId}
                           className="flex items-center gap-1.5 rounded-full border border-line bg-surface-2/60 px-2.5 py-1 text-xs text-ink/90"
                         >
+                          <span className="rounded bg-brand/10 px-1 text-[9px] font-bold uppercase tracking-wider text-brand">
+                            {goalkeeperPreferenceLabel(player.goalkeeperPreference)}
+                          </span>
                           {player.name}
                           {player.memberType === "GUEST" ? (
                             <span className="rounded bg-ink/5 px-1 text-[9px] font-bold uppercase tracking-wider text-muted">

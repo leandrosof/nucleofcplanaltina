@@ -1,5 +1,9 @@
 import { Hand } from "lucide-react";
-import { readableTextColor, teamVisualByColor } from "@/lib/teams";
+import {
+  goalkeeperPreferenceLabel,
+  readableTextColor,
+  teamVisualByColor,
+} from "@/lib/teams";
 import { cn } from "@/lib/utils";
 
 export type TeamCardTeam = {
@@ -12,6 +16,7 @@ export type TeamCardTeam = {
     memberType?: "MEMBER" | "GUEST";
     position?: "GOALKEEPER" | "FIELD";
     temporaryGoalkeeper?: boolean;
+    goalkeeperPreference?: "FIXED" | "FIELD" | "ANY";
   }[];
 };
 
@@ -106,6 +111,11 @@ export function TeamCard({
         <div className="min-w-0 flex-1">
           <p className="text-[9px] font-bold uppercase tracking-wider text-warning">Goleiro</p>
           <p className={cn("truncate font-semibold text-ink", compact ? "text-sm" : "text-sm")}>
+            {goalkeeper ? (
+              <span className="mr-1 rounded bg-[rgba(245,185,66,0.2)] px-1 text-[9px] font-bold uppercase tracking-wider text-warning">
+                {goalkeeperPreferenceLabel(goalkeeper.goalkeeperPreference)}
+              </span>
+            ) : null}
             {goalkeeper ? goalkeeper.name : "Pendente"}
           </p>
         </div>
@@ -128,6 +138,9 @@ export function TeamCard({
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-ink/5 text-[11px] font-bold text-muted">
               {index + 1}
+            </span>
+            <span className="shrink-0 rounded bg-brand/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand">
+              {goalkeeperPreferenceLabel(player.goalkeeperPreference)}
             </span>
             <span className="truncate">{player.name}</span>
             <MemberTag memberType={player.memberType} />

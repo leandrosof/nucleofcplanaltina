@@ -18,7 +18,7 @@ export default defineConfig({
     command: "yarn dev:e2e",
     url: "http://localhost:3100/entrar",
     timeout: 180_000,
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
   },
   projects: [
     {

@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { drawTeams, events, gamePlayers, games, scoreEvents, users } from "../schema";
+import { attendances, drawTeams, events, gamePlayers, games, scoreEvents, users } from "../schema";
 import type { Game } from "../schema";
 
 const teamA = alias(drawTeams, "team_a");
@@ -18,9 +18,18 @@ async function getGameParticipants(gameIds: string[]) {
       memberType: users.memberType,
       position: gamePlayers.position,
       temporaryGoalkeeper: gamePlayers.temporaryGoalkeeper,
+      goalkeeperPreference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
     })
     .from(gamePlayers)
     .innerJoin(users, eq(users.id, gamePlayers.userId))
+    .innerJoin(games, eq(games.id, gamePlayers.gameId))
+    .leftJoin(
+      attendances,
+      and(
+        eq(attendances.eventId, games.eventId),
+        eq(attendances.userId, gamePlayers.userId),
+      ),
+    )
     .where(inArray(gamePlayers.gameId, gameIds))
     .orderBy(asc(users.name));
 }
@@ -42,6 +51,7 @@ export type GamePlayerSummary = {
   memberType: "MEMBER" | "GUEST";
   position: "GOALKEEPER" | "FIELD";
   temporaryGoalkeeper: boolean;
+  goalkeeperPreference: "FIXED" | "FIELD" | "ANY";
 };
 
 async function hydrate(rows: { game: Game; eventTitle: string; eventStartsAt: Date; teamAName: string; teamAColor: string; teamBName: string; teamBColor: string }[]): Promise<GameWithTeams[]> {
@@ -66,6 +76,7 @@ async function hydrate(rows: { game: Game; eventTitle: string; eventStartsAt: Da
           memberType: player.memberType,
           position: player.position,
           temporaryGoalkeeper: player.temporaryGoalkeeper,
+          goalkeeperPreference: player.goalkeeperPreference,
         })),
       teamBPlayers: mine
         .filter((player) => player.teamId === row.game.teamBId)
@@ -75,6 +86,7 @@ async function hydrate(rows: { game: Game; eventTitle: string; eventStartsAt: Da
           memberType: player.memberType,
           position: player.position,
           temporaryGoalkeeper: player.temporaryGoalkeeper,
+          goalkeeperPreference: player.goalkeeperPreference,
         })),
     };
   });

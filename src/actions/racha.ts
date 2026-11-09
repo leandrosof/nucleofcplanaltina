@@ -30,6 +30,7 @@ import {
   type RachaRule,
 } from "@/lib/racha";
 import { shuffle } from "@/lib/draw";
+import { assignGoalkeepers } from "@/lib/goalkeepers";
 import { getSessionUser } from "@/lib/session";
 import { teamVisualForIndex } from "@/lib/teams";
 import {
@@ -57,6 +58,7 @@ type PresentRow = {
   queueTeamId: string | null;
   rotationStatus: "IDLE" | "WAITING" | "PLAYING" | "LEFT" | "PAUSED";
   goalkeeperPreference: "FIXED" | "FIELD" | "ANY";
+  lastPlayedAt: Date | null;
 };
 
 function toRachaPlayers(rows: PresentRow[]): RachaPlayer[] {
@@ -88,6 +90,7 @@ async function loadPresent(tx: Tx, eventId: string): Promise<PresentRow[]> {
       queueTeamId: attendances.queueTeamId,
       rotationStatus: attendances.rotationStatus,
       goalkeeperPreference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
+      lastPlayedAt: attendances.lastPlayedAt,
     })
     .from(attendances)
     .innerJoin(users, eq(users.id, attendances.userId))
@@ -312,7 +315,7 @@ async function createSession(
     );
   }
 
-  const teams: { id: string; players: string[]; goalkeeperId: string | null }[] = [];
+  const teams: { id: string; players: PresentRow[] }[] = [];
   for (let index = 0; index < teamCount; index += 1) {
     const visual = teamVisualForIndex(index);
     const [team] = await tx
@@ -326,22 +329,56 @@ async function createSession(
       .returning({ id: drawTeams.id });
     teams.push({
       id: team.id,
-      players: fieldPool
-        .slice(index * teamSize, (index + 1) * teamSize)
-        .map((row) => row.userId),
-      goalkeeperId: fixedPool[index]?.userId ?? null,
+      players: fieldPool.slice(index * teamSize, (index + 1) * teamSize),
     });
   }
+
+  let availableFixed = [...fixedPool];
+  let reserveFields = [
+    ...teams.slice(courtCount * 2).flatMap((team) => team.players),
+    ...fieldPool.slice(teamCount * teamSize),
+  ];
 
   for (let court = 1; court <= courtCount; court += 1) {
     const teamAIndex = (court - 1) * 2;
     const teamBIndex = teamAIndex + 1;
     const teamA = teams[teamAIndex];
     const teamB = teams[teamBIndex];
-    const goalkeeperA = teamA.goalkeeperId;
-    const goalkeeperB = teamB.goalkeeperId;
-    const courtPlayersA = [...teamA.players, ...(goalkeeperA ? [goalkeeperA] : [])];
-    const courtPlayersB = [...teamB.players, ...(goalkeeperB ? [goalkeeperB] : [])];
+
+    const assignment = assignGoalkeepers({
+      sideAFields: teamA.players,
+      sideBFields: teamB.players,
+      queue: reserveFields,
+      fixedGoalkeepers: availableFixed,
+    });
+    availableFixed = assignment.remainingFixed;
+    reserveFields = assignment.queue;
+    teams[teamAIndex].players = assignment.sideAFields;
+    teams[teamBIndex].players = assignment.sideBFields;
+
+    const goalkeeperA = assignment.goalkeeperA;
+    const goalkeeperB = assignment.goalkeeperB;
+    const courtPlayersA = [
+      ...assignment.sideAFields,
+      ...(goalkeeperA ? [goalkeeperA] : []),
+    ];
+    const courtPlayersB = [
+      ...assignment.sideBFields,
+      ...(goalkeeperB ? [goalkeeperB] : []),
+    ];
+    const preservedQueue = new Map<string, number>();
+    if (
+      assignment.goalkeeperASource === "QUEUE" &&
+      goalkeeperA?.queuePosition != null
+    ) {
+      preservedQueue.set(goalkeeperA.userId, goalkeeperA.queuePosition);
+    }
+    if (
+      assignment.goalkeeperBSource === "QUEUE" &&
+      goalkeeperB?.queuePosition != null
+    ) {
+      preservedQueue.set(goalkeeperB.userId, goalkeeperB.queuePosition);
+    }
 
     const [game] = await tx
       .insert(games)
@@ -359,23 +396,35 @@ async function createSession(
       .returning({ id: games.id });
 
     await tx.insert(gamePlayers).values([
-      ...teamA.players.map((userId) => ({
+      ...assignment.sideAFields.map((row) => ({
         gameId: game.id,
         teamId: teamA.id,
-        userId,
+        userId: row.userId,
         position: "FIELD" as const,
       })),
-      ...teamB.players.map((userId) => ({
+      ...assignment.sideBFields.map((row) => ({
         gameId: game.id,
         teamId: teamB.id,
-        userId,
+        userId: row.userId,
         position: "FIELD" as const,
       })),
       ...(goalkeeperA
-        ? [{ gameId: game.id, teamId: teamA.id, userId: goalkeeperA, role: "SUB" as const, position: "GOALKEEPER" as const }]
+        ? [{
+            gameId: game.id,
+            teamId: teamA.id,
+            userId: goalkeeperA.userId,
+            role: assignment.goalkeeperASource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
+            position: "GOALKEEPER" as const,
+          }]
         : []),
       ...(goalkeeperB
-        ? [{ gameId: game.id, teamId: teamB.id, userId: goalkeeperB, role: "SUB" as const, position: "GOALKEEPER" as const }]
+        ? [{
+            gameId: game.id,
+            teamId: teamB.id,
+            userId: goalkeeperB.userId,
+            role: assignment.goalkeeperBSource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
+            position: "GOALKEEPER" as const,
+          }]
         : []),
     ]);
 
@@ -385,29 +434,30 @@ async function createSession(
       status: "PLAYING",
       teamAId: teamA.id,
       teamBId: teamB.id,
-      playerAIds: courtPlayersA,
-      playerBIds: courtPlayersB,
+      playerAIds: courtPlayersA.map((row) => row.userId),
+      playerBIds: courtPlayersB.map((row) => row.userId),
       currentGameId: game.id,
     });
 
-    for (const userId of [...courtPlayersA, ...courtPlayersB]) {
+    for (const row of [...courtPlayersA, ...courtPlayersB]) {
       await tx
         .update(attendances)
         .set({
           rotationStatus: "PLAYING",
-          queuePosition: null,
+          queuePosition: preservedQueue.get(row.userId) ?? null,
           queueTeamId: null,
           updatedAt: new Date(),
         })
-        .where(and(eq(attendances.eventId, eventId), eq(attendances.userId, userId)));
+        .where(and(eq(attendances.eventId, eventId), eq(attendances.userId, row.userId)));
     }
   }
 
   let position = 0;
-  for (let index = courtCount * 2; index < teams.length; index += 1) {
-    const team = teams[index];
-    const blockPlayers = [...team.players, ...(team.goalkeeperId ? [team.goalkeeperId] : [])];
-    for (const userId of blockPlayers) {
+  const reserveTeams = teams.slice(courtCount * 2);
+  for (const team of reserveTeams) {
+    const block = reserveFields.splice(0, teamSize);
+    if (block.length === 0) continue;
+    for (const row of block) {
       position += 1;
       await tx
         .update(attendances)
@@ -417,13 +467,24 @@ async function createSession(
           queueTeamId: queueModeValue === "KEEP_TEAM" ? team.id : null,
           updatedAt: new Date(),
         })
-        .where(and(eq(attendances.eventId, eventId), eq(attendances.userId, userId)));
+        .where(and(eq(attendances.eventId, eventId), eq(attendances.userId, row.userId)));
     }
   }
 
-  const freeFieldPlayers = fieldPool.slice(teamCount * teamSize);
-  const freeFixedPlayers = fixedPool.slice(teamCount);
-  for (const row of [...freeFieldPlayers, ...freeFixedPlayers]) {
+  for (const row of reserveFields) {
+    position += 1;
+    await tx
+      .update(attendances)
+      .set({
+        rotationStatus: "WAITING",
+        queuePosition: position,
+        queueTeamId: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(attendances.eventId, eventId), eq(attendances.userId, row.userId)));
+  }
+
+  for (const row of availableFixed) {
     position += 1;
     await tx
       .update(attendances)
@@ -468,19 +529,43 @@ async function mountNextForCourt(
   const waiting = (await loadPresent(tx, eventId)).filter(
     (row) => row.rotationStatus === "WAITING",
   );
-  const fixedGoalkeepers = waiting.filter((row) => row.goalkeeperPreference === "FIXED");
+  const fixedGoalkeepers = waiting
+    .filter((row) => row.goalkeeperPreference === "FIXED")
+    .sort(
+      (a, b) =>
+        a.gamesPlayed - b.gamesPlayed ||
+        (a.queuePosition ?? 999) - (b.queuePosition ?? 999),
+    );
   const fieldPlayers = waiting.filter((row) => row.goalkeeperPreference !== "FIXED");
   const plan = planFirstMatch(toRachaPlayers(fieldPlayers), draw.teamSize, "HYBRID");
   if (!plan.ok) return null;
 
-  const goalkeeperA = fixedGoalkeepers[0]?.userId ?? null;
-  const goalkeeperB = fixedGoalkeepers[1]?.userId ?? null;
-  const usedGoalkeepers = new Set([goalkeeperA, goalkeeperB].filter(Boolean));
-  const sideA = [...plan.sideA, ...(goalkeeperA ? [goalkeeperA] : [])];
-  const sideB = [...plan.sideB, ...(goalkeeperB ? [goalkeeperB] : [])];
+  const fieldById = new Map(fieldPlayers.map((row) => [row.userId, row]));
+  const sideAFields = plan.sideA
+    .map((userId) => fieldById.get(userId))
+    .filter((row): row is PresentRow => Boolean(row));
+  const sideBFields = plan.sideB
+    .map((userId) => fieldById.get(userId))
+    .filter((row): row is PresentRow => Boolean(row));
+  const queueFields = plan.queue
+    .map((userId) => fieldById.get(userId))
+    .filter((row): row is PresentRow => Boolean(row));
+
+  const assignment = assignGoalkeepers({
+    sideAFields,
+    sideBFields,
+    queue: queueFields,
+    fixedGoalkeepers,
+  });
+  const goalkeeperA = assignment.goalkeeperA?.userId ?? null;
+  const goalkeeperB = assignment.goalkeeperB?.userId ?? null;
+  const sideAFieldIds = assignment.sideAFields.map((row) => row.userId);
+  const sideBFieldIds = assignment.sideBFields.map((row) => row.userId);
+  const sideA = [...sideAFieldIds, ...(goalkeeperA ? [goalkeeperA] : [])];
+  const sideB = [...sideBFieldIds, ...(goalkeeperB ? [goalkeeperB] : [])];
   const queue = [
-    ...plan.queue,
-    ...fixedGoalkeepers.filter((row) => !usedGoalkeepers.has(row.userId)).map((row) => row.userId),
+    ...assignment.queue.map((row) => row.userId),
+    ...assignment.remainingFixed.map((row) => row.userId),
   ];
 
   const [teamCountRow] = await tx
@@ -522,23 +607,35 @@ async function mountNextForCourt(
     .returning({ id: games.id });
 
   await tx.insert(gamePlayers).values([
-    ...plan.sideA.map((userId) => ({
+    ...sideAFieldIds.map((userId) => ({
       gameId: game.id,
       teamId: teamA.id,
       userId,
       position: "FIELD" as const,
     })),
-    ...plan.sideB.map((userId) => ({
+    ...sideBFieldIds.map((userId) => ({
       gameId: game.id,
       teamId: teamB.id,
       userId,
       position: "FIELD" as const,
     })),
     ...(goalkeeperA
-      ? [{ gameId: game.id, teamId: teamA.id, userId: goalkeeperA, role: "SUB" as const, position: "GOALKEEPER" as const }]
+      ? [{
+          gameId: game.id,
+          teamId: teamA.id,
+          userId: goalkeeperA,
+          role: assignment.goalkeeperASource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
+          position: "GOALKEEPER" as const,
+        }]
       : []),
     ...(goalkeeperB
-      ? [{ gameId: game.id, teamId: teamB.id, userId: goalkeeperB, role: "SUB" as const, position: "GOALKEEPER" as const }]
+      ? [{
+          gameId: game.id,
+          teamId: teamB.id,
+          userId: goalkeeperB,
+          role: assignment.goalkeeperBSource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
+          position: "GOALKEEPER" as const,
+        }]
       : []),
   ]);
 
@@ -556,6 +653,23 @@ async function mountNextForCourt(
     .where(eq(rotationCourts.id, courtRow.id));
 
   await applyLineup(tx, eventId, sideA, sideB, queue);
+
+  if (assignment.goalkeeperASource === "QUEUE" && assignment.goalkeeperA?.queuePosition != null) {
+    await tx
+      .update(attendances)
+      .set({ queuePosition: assignment.goalkeeperA.queuePosition, updatedAt: new Date() })
+      .where(
+        and(eq(attendances.eventId, eventId), eq(attendances.userId, goalkeeperA!)),
+      );
+  }
+  if (assignment.goalkeeperBSource === "QUEUE" && assignment.goalkeeperB?.queuePosition != null) {
+    await tx
+      .update(attendances)
+      .set({ queuePosition: assignment.goalkeeperB.queuePosition, updatedAt: new Date() })
+      .where(
+        and(eq(attendances.eventId, eventId), eq(attendances.userId, goalkeeperB!)),
+      );
+  }
   return game.id;
 }
 
@@ -840,8 +954,12 @@ export async function startMatchAction(
       const goalkeeperB = roster.filter(
         (row) => row.teamId === game.teamBId && row.position === "GOALKEEPER",
       ).length;
-      if (fieldA === 0 || fieldA !== fieldB) {
-        throw new AppError("Complete os dois times com o mesmo número de jogadores de linha antes de iniciar.");
+      if (
+        fieldA === 0 ||
+        fieldB === 0 ||
+        Math.abs(fieldA - fieldB) > 1
+      ) {
+        throw new AppError("Os times precisam ter no máximo 1 jogador de linha de diferença.");
       }
       if (goalkeeperA !== 1 || goalkeeperB !== 1) {
         throw new AppError("Defina um goleiro para cada time antes de iniciar a partida.");
@@ -901,8 +1019,19 @@ export async function finalizeMatchAction(
           userId: gamePlayers.userId,
           teamId: gamePlayers.teamId,
           position: gamePlayers.position,
+          role: gamePlayers.role,
+          replacedUserId: gamePlayers.replacedUserId,
+          goalkeeperPreference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
         })
         .from(gamePlayers)
+        .innerJoin(users, eq(users.id, gamePlayers.userId))
+        .leftJoin(
+          attendances,
+          and(
+            eq(attendances.eventId, game.eventId),
+            eq(attendances.userId, gamePlayers.userId),
+          ),
+        )
         .where(and(eq(gamePlayers.gameId, game.id), isNull(gamePlayers.leftAt)));
       const fieldA = roster
         .filter((row) => row.teamId === game.teamAId && row.position === "FIELD")
@@ -910,14 +1039,32 @@ export async function finalizeMatchAction(
       const fieldB = roster
         .filter((row) => row.teamId === game.teamBId && row.position === "FIELD")
         .map((row) => row.userId);
-      const currentGoalkeepers = roster
-        .filter((row) => row.position === "GOALKEEPER")
+      const currentGoalkeeperRows = roster.filter((row) => row.position === "GOALKEEPER");
+      const extraTempGoalkeepers = currentGoalkeeperRows
+        .filter(
+          (row) =>
+            row.goalkeeperPreference !== "FIXED" &&
+            row.role === "SUB" &&
+            row.replacedUserId === null,
+        )
         .map((row) => row.userId);
-      if (fieldA.length === 0 || fieldA.length !== fieldB.length) {
+      const fixedExtraGoalkeepers = currentGoalkeeperRows
+        .filter(
+          (row) => row.goalkeeperPreference === "FIXED" && row.role === "SUB" && row.replacedUserId === null,
+        )
+        .map((row) => row.userId);
+      const teamGoalkeepers = currentGoalkeeperRows
+        .filter((row) => !extraTempGoalkeepers.includes(row.userId) && !fixedExtraGoalkeepers.includes(row.userId))
+        .map((row) => row.userId);
+      if (
+        fieldA.length === 0 ||
+        fieldB.length === 0 ||
+        Math.abs(fieldA.length - fieldB.length) > 1
+      ) {
         throw new AppError("Há jogador de linha faltando. Substitua antes de finalizar a partida.");
       }
 
-      const teamSize = fieldA.length;
+      const teamSize = draw.teamSize;
       const isDraw = game.scoreA === game.scoreB;
       if (isDraw && !parsed.data.stayingSide) {
         throw new AppError("Empate! Escolha qual time permanece para a próxima partida.");
@@ -960,7 +1107,12 @@ export async function finalizeMatchAction(
         })
         .where(eq(games.id, game.id));
 
-      for (const userId of [...winnerIds, ...loserIds, ...currentGoalkeepers]) {
+      for (const userId of [
+        ...winnerIds,
+        ...loserIds,
+        ...teamGoalkeepers,
+        ...fixedExtraGoalkeepers,
+      ]) {
         await tx
           .update(attendances)
           .set({
@@ -971,23 +1123,55 @@ export async function finalizeMatchAction(
           .where(and(eq(attendances.eventId, game.eventId), eq(attendances.userId, userId)));
       }
 
+      for (const userId of extraTempGoalkeepers) {
+        await tx
+          .update(attendances)
+          .set({ lastPlayedAt: new Date(), updatedAt: new Date() })
+          .where(and(eq(attendances.eventId, game.eventId), eq(attendances.userId, userId)));
+      }
+
       const [event] = await tx.select().from(events).where(eq(events.id, game.eventId)).limit(1);
       const rule = toRule(event?.rotationRule ?? "HYBRID");
       const keepTeam = draw.queueMode === "KEEP_TEAM";
       await dissolvePartialBlocks(tx, game.eventId, teamSize);
       const present = await loadPresent(tx, game.eventId);
-      const planPlayers = present.filter(
-        (row) =>
-          row.goalkeeperPreference !== "FIXED" &&
-          (row.rotationStatus === "WAITING" ||
-            winnerIds.includes(row.userId) ||
-            loserIds.includes(row.userId)),
+      const extraTempSet = new Set(extraTempGoalkeepers);
+      const teamGoalkeeperSet = new Set(teamGoalkeepers);
+      const maxQueuePosition = Math.max(
+        0,
+        ...present
+          .filter((row) => row.rotationStatus === "WAITING")
+          .map((row) => row.queuePosition ?? 0),
       );
-      const playersForPlan = toRachaPlayers(planPlayers).map((player) =>
-        loserIds.includes(player.userId)
-          ? { ...player, blockId: keepTeam ? otherTeamId : null }
-          : player,
-      );
+      let teamGoalkeeperOffset = 0;
+      const planPlayers = present.filter((row) => {
+        if (row.goalkeeperPreference === "FIXED") return false;
+        if (extraTempSet.has(row.userId) || teamGoalkeeperSet.has(row.userId)) return true;
+        return (
+          row.rotationStatus === "WAITING" ||
+          winnerIds.includes(row.userId) ||
+          loserIds.includes(row.userId)
+        );
+      });
+      const playersForPlan = planPlayers.map((row) => {
+        let queuePosition = row.queuePosition ?? 0;
+        if (extraTempSet.has(row.userId)) {
+          queuePosition = (row.queuePosition ?? maxQueuePosition + 1) - 0.5;
+        } else if (teamGoalkeeperSet.has(row.userId)) {
+          teamGoalkeeperOffset += 1;
+          queuePosition = maxQueuePosition + teamGoalkeeperOffset;
+        }
+        return {
+          userId: row.userId,
+          gamesPlayed: row.gamesPlayed,
+          queuePosition,
+          blockId: loserIds.includes(row.userId)
+            ? keepTeam
+              ? otherTeamId
+              : null
+            : row.queueTeamId,
+        };
+      });
       const plan = planNextMatch({
         rule,
         teamSize,
@@ -1006,7 +1190,7 @@ export async function finalizeMatchAction(
               row.rotationStatus === "WAITING" ||
               winnerIds.includes(row.userId) ||
               loserIds.includes(row.userId) ||
-              currentGoalkeepers.includes(row.userId),
+              currentGoalkeeperRows.some((gk) => gk.userId === row.userId),
           )
           .sort(
             (a, b) =>
@@ -1135,33 +1319,68 @@ export async function finalizeMatchAction(
         })
         .returning({ id: games.id });
 
+      const presentById = new Map(present.map((row) => [row.userId, row]));
       const fixedGoalkeepers = present
-        .filter((row) => row.goalkeeperPreference === "FIXED")
+        .filter(
+          (row) =>
+            row.goalkeeperPreference === "FIXED" && row.rotationStatus !== "LEFT",
+        )
         .sort(
           (a, b) =>
             a.gamesPlayed - b.gamesPlayed ||
             (a.queuePosition ?? 999) - (b.queuePosition ?? 999),
         );
-      const goalkeeperA = fixedGoalkeepers[0]?.userId ?? null;
-      const goalkeeperB = fixedGoalkeepers[1]?.userId ?? null;
-      const usedGoalkeepers = new Set([goalkeeperA, goalkeeperB].filter(Boolean));
-      const nextQueue = [
-        ...plan.queue,
-        ...fixedGoalkeepers
-          .filter((row) => !usedGoalkeepers.has(row.userId))
-          .map((row) => row.userId),
+      const sideAFieldRows = plan.sideA
+        .map((userId) => presentById.get(userId))
+        .filter((row): row is PresentRow => Boolean(row));
+      const sideBFieldRows = plan.sideB
+        .map((userId) => presentById.get(userId))
+        .filter((row): row is PresentRow => Boolean(row));
+      const queueRows = plan.queue
+        .map((userId) => presentById.get(userId))
+        .filter((row): row is PresentRow => Boolean(row));
+      const assignment = assignGoalkeepers({
+        sideAFields: sideAFieldRows,
+        sideBFields: sideBFieldRows,
+        queue: queueRows,
+        fixedGoalkeepers,
+      });
+      const goalkeeperA = assignment.goalkeeperA;
+      const goalkeeperB = assignment.goalkeeperB;
+      const sideAFieldIds = assignment.sideAFields.map((row) => row.userId);
+      const sideBFieldIds = assignment.sideBFields.map((row) => row.userId);
+      const nextQueueRows = [...assignment.queue, ...assignment.remainingFixed];
+      const nextQueue = nextQueueRows.map((row) => row.userId);
+      const sideAPlaying = [
+        ...sideAFieldIds,
+        ...(goalkeeperA ? [goalkeeperA.userId] : []),
       ];
-      const sideAPlaying = [...plan.sideA, ...(goalkeeperA ? [goalkeeperA] : [])];
-      const sideBPlaying = [...plan.sideB, ...(goalkeeperB ? [goalkeeperB] : [])];
+      const sideBPlaying = [
+        ...sideBFieldIds,
+        ...(goalkeeperB ? [goalkeeperB.userId] : []),
+      ];
+      const preservedNextQueue = new Map<string, number>();
+      if (
+        assignment.goalkeeperASource === "QUEUE" &&
+        goalkeeperA?.queuePosition != null
+      ) {
+        preservedNextQueue.set(goalkeeperA.userId, goalkeeperA.queuePosition);
+      }
+      if (
+        assignment.goalkeeperBSource === "QUEUE" &&
+        goalkeeperB?.queuePosition != null
+      ) {
+        preservedNextQueue.set(goalkeeperB.userId, goalkeeperB.queuePosition);
+      }
 
       await tx.insert(gamePlayers).values([
-        ...plan.sideA.map((userId) => ({
+        ...sideAFieldIds.map((userId) => ({
           gameId: next.id,
           teamId: nextTeamAId,
           userId,
           position: "FIELD" as const,
         })),
-        ...plan.sideB.map((userId) => ({
+        ...sideBFieldIds.map((userId) => ({
           gameId: next.id,
           teamId: nextTeamBId,
           userId,
@@ -1171,8 +1390,8 @@ export async function finalizeMatchAction(
           ? [{
               gameId: next.id,
               teamId: nextTeamAId,
-              userId: goalkeeperA,
-              role: "SUB" as const,
+              userId: goalkeeperA.userId,
+              role: assignment.goalkeeperASource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
               position: "GOALKEEPER" as const,
             }]
           : []),
@@ -1180,25 +1399,19 @@ export async function finalizeMatchAction(
           ? [{
               gameId: next.id,
               teamId: nextTeamBId,
-              userId: goalkeeperB,
-              role: "SUB" as const,
+              userId: goalkeeperB.userId,
+              role: assignment.goalkeeperBSource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
               position: "GOALKEEPER" as const,
             }]
           : []),
       ]);
 
       const blocks = new Map<string, string | null>();
-      if (plan.queue.length > 0) {
-        const queueRows = await tx
-          .select({ userId: attendances.userId, queueTeamId: attendances.queueTeamId })
-          .from(attendances)
-          .where(
-            and(eq(attendances.eventId, game.eventId), inArray(attendances.userId, plan.queue)),
-          );
-        for (const row of queueRows) blocks.set(row.userId, row.queueTeamId ?? null);
+      for (const row of nextQueueRows) {
+        blocks.set(row.userId, row.queueTeamId ?? null);
       }
       for (const loserId of loserIds) {
-        if (plan.queue.includes(loserId)) {
+        if (nextQueue.includes(loserId)) {
           blocks.set(loserId, keepTeam ? otherTeamId : null);
         }
       }
@@ -1220,6 +1433,16 @@ export async function finalizeMatchAction(
 
       await applyLineup(tx, game.eventId, sideAPlaying, sideBPlaying, nextQueue, blocks);
       await renumberQueue(tx, game.eventId);
+
+      for (const [userId, queuePosition] of preservedNextQueue) {
+        await tx
+          .update(attendances)
+          .set({ queuePosition, updatedAt: new Date() })
+          .where(
+            and(eq(attendances.eventId, game.eventId), eq(attendances.userId, userId)),
+          );
+      }
+
       await tx
         .update(games)
         .set({ undoState: { attendances: snapshot, nextGameId: next.id } })
@@ -1579,12 +1802,11 @@ export async function leaveRachaAction(
             .where(eq(gamePlayers.id, playerRow.id));
           await tx
             .update(attendances)
-            .set({
-        rotationStatus: "PLAYING",
-        queuePosition: null,
-        queueTeamId: null,
-        updatedAt: new Date(),
-      })
+        .set({
+          rotationStatus: "PLAYING",
+          queueTeamId: null,
+          updatedAt: new Date(),
+        })
             .where(
               and(eq(attendances.eventId, row.eventId), eq(attendances.userId, candidate.userId)),
             );

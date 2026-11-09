@@ -27,11 +27,16 @@ const env: NodeJS.ProcessEnv = {
 };
 
 if (!useExternalDatabase) {
-  env.DATABASE_URL = isE2E
+  const localUrl = isE2E
     ? localDatabaseUrl(databasePort, databaseName)
     : configuredUrl || localDatabaseUrl(databasePort, databaseName);
+  env.DATABASE_URL = localUrl;
+  env.DATABASE_URL_UNPOOLED = localUrl;
+  env.MIGRATE_DATABASE_URL = localUrl;
 } else if (isE2E) {
   env.DATABASE_URL = e2eDatabaseUrl;
+  env.DATABASE_URL_UNPOOLED = e2eDatabaseUrl;
+  env.MIGRATE_DATABASE_URL = e2eDatabaseUrl;
 }
 
 if (isE2E) {

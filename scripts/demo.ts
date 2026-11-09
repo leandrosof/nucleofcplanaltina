@@ -66,6 +66,9 @@ async function run() {
       { name: "Larissa Melo", email: "larissa@arena.local", role: "PLAYER" as const, nickname: "Lari" },
       { name: "Marcos Silva", email: "marcos@arena.local", role: "PLAYER" as const, nickname: "Marcão", memberType: "GUEST" as const },
       { name: "Natália Costa", email: "natalia@arena.local", role: "PLAYER" as const, nickname: "Naty", memberType: "GUEST" as const },
+      { name: "Otávio Pinto", email: "otavio@arena.local", role: "PLAYER" as const, nickname: "Tavinho" },
+      { name: "Paula Rocha", email: "paula@arena.local", role: "PLAYER" as const, nickname: "Paulinha" },
+      { name: "Renato Alves", email: "renato@arena.local", role: "PLAYER" as const, nickname: "Renatinho" },
     ];
 
     const insertedUsers = await db
@@ -111,7 +114,7 @@ async function run() {
         startsAt: new Date(nextSaturday.getTime()),
         venueName: "Arena Praia Clube",
         address: "Rua das Palmeiras, 240 · Quadra 2",
-        maxPlayers: 16,
+        maxPlayers: 15,
         notes: "Chegar 15 minutos antes para aquecer. Levem colete claro e escuro.",
         createdById: admin.id,
       })
@@ -131,8 +134,8 @@ async function run() {
       })
       .returning({ id: schema.events.id });
 
-    const upcomingConfirmed = [...insertedUsers.slice(0, 12), ...insertedUsers.slice(14, 16)];
-    const upcomingWaitlist = insertedUsers.slice(12, 14);
+    const upcomingConfirmed = [...insertedUsers.slice(0, 12), ...insertedUsers.slice(14, 17)];
+    const upcomingWaitlist = insertedUsers.slice(12, 13);
 
     await db.insert(schema.attendances).values([
       ...upcomingConfirmed.map((user, index) => ({

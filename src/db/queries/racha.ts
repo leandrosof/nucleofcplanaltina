@@ -23,6 +23,7 @@ export type RachaGamePlayer = {
   memberType: "MEMBER" | "GUEST";
   position: "GOALKEEPER" | "FIELD";
   temporaryGoalkeeper: boolean;
+  goalkeeperPreference: "FIXED" | "FIELD" | "ANY";
 };
 
 export type RachaGameView = {
@@ -147,9 +148,17 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
             memberType: users.memberType,
             position: gamePlayers.position,
             temporaryGoalkeeper: gamePlayers.temporaryGoalkeeper,
+            goalkeeperPreference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
           })
           .from(gamePlayers)
           .innerJoin(users, eq(users.id, gamePlayers.userId))
+          .leftJoin(
+            attendances,
+            and(
+              eq(attendances.eventId, eventId),
+              eq(attendances.userId, gamePlayers.userId),
+            ),
+          )
           .where(inArray(gamePlayers.gameId, gameIds))
           .orderBy(asc(users.name))
       : [];
@@ -186,6 +195,7 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
           memberType: player.memberType,
           position: player.position,
           temporaryGoalkeeper: player.temporaryGoalkeeper,
+          goalkeeperPreference: player.goalkeeperPreference,
         })),
       teamBPlayers: participants
         .filter((player) => player.teamId === row.teamBId)
@@ -195,6 +205,7 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
           memberType: player.memberType,
           position: player.position,
           temporaryGoalkeeper: player.temporaryGoalkeeper,
+          goalkeeperPreference: player.goalkeeperPreference,
         })),
       winnerTeamId: row.winnerTeamId,
       startedAt: row.startedAt,

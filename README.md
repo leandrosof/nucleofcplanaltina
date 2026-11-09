@@ -132,10 +132,13 @@ basta alterar `DATABASE_URL` em `.env.local`.
 - Times nomeados `Time 1`, `Time 2`... com coletes **azul** e **vermelho**.
 
 ### Goleiros
+- Rótulos na escalação: **GOL** (goleiro fixo), **GL** (pode jogar no gol) e **LIN** (linha).
 - O goleiro é uma **vaga extra**: 8 de linha + 1 goleiro = 9 no time.
-- Goleiros fixos são distribuídos um por time no sorteio.
+- Escolha automática: goleiro fixo → GL da fila → GL do próprio time + LIN da fila para repor a linha → pendente.
+- Goleiros fixos são distribuídos um por time no sorteio e rodiziam por menos jogos.
 - O admin pode definir ou trocar o goleiro de cada time manualmente.
-- Goleiro temporário não fica preso ao time: após a partida volta à fila normal.
+- GL vindo da fila como goleiro temporário **não conta jogo de linha** e mantém a prioridade na fila; no jogo seguinte volta como LIN.
+- GL do próprio time que sobe para o gol conta o jogo normalmente e volta para a linha/fila depois.
 - Posição (`GOALKEEPER`/`FIELD`) e goleiro temporário ficam registrados na partida.
 
 ### Placar, histórico e ranking
