@@ -5,7 +5,9 @@ import {
   Check,
   Clock,
   ListOrdered,
+  LogIn,
   MapPin,
+  Undo2,
   UserCog,
   UserPlus,
   Users,
@@ -18,6 +20,7 @@ import {
   adminRemoveAttendanceAction,
   toggleOrganizerAction,
 } from "@/actions/attendance";
+import { checkInRachaAction, undoCheckInAction } from "@/actions/racha";
 import { AttendanceControls } from "@/components/features/attendance-controls";
 import { AutoRefresh } from "@/components/features/auto-refresh";
 import { GoalkeeperBadge, MemberBadge } from "@/components/features/member-badge";
@@ -38,7 +41,7 @@ import { getEventById, getEventRoster, listOperationalEvents } from "@/db/querie
 import { requireUser } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { surfaceLabel } from "@/lib/surface";
-import { formatDateTime } from "@/lib/time";
+import { formatDateTime, formatTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Presenças" };
@@ -69,6 +72,7 @@ export default async function AttendancePage({
 
   const isAdmin = user.role === "ADMIN";
   const reservedCount = roster?.confirmed.length ?? 0;
+  const arrivedCount = roster?.confirmed.filter((player) => player.checkedInAt).length ?? 0;
   const isFull = Boolean(selected && roster && reservedCount >= selected.maxPlayers);
   const remaining = selected ? Math.max(selected.maxPlayers - reservedCount, 0) : 0;
   const eventIsOpen = Boolean(selected && selected.status === "SCHEDULED");
@@ -149,6 +153,7 @@ export default async function AttendancePage({
 
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="success">{roster.confirmed.length} confirmados</Badge>
+                <Badge tone="brand">{arrivedCount} já chegaram</Badge>
                 <Badge tone="warning">{roster.waitlist.length} na espera</Badge>
                 <Badge tone="neutral">{roster.pending.length} sem resposta</Badge>
                 <div className="ml-auto">
@@ -185,6 +190,12 @@ export default async function AttendancePage({
                   isOrganizer={Boolean(mine?.isOrganizer)}
                 />
               )}
+
+              <p className="rounded-xl border border-line bg-surface-2/50 px-3 py-2 text-xs leading-relaxed text-muted">
+                <span className="font-semibold text-ink">Pré-reserva:</span> confirmar presença garante sua
+                vaga na lista. A chegada deve ser marcada em <span className="font-semibold text-ink">Cheguei</span>{" "}
+                somente quando você estiver no local, pois é o que entra no racha.
+              </p>
             </CardBody>
           </Card>
 
@@ -218,35 +229,79 @@ export default async function AttendancePage({
                             ) : null}
                           </p>
                           {player.nickname ? <p className="text-[11px] text-muted">@{player.nickname}</p> : null}
-                          <div className="mt-1 flex flex-wrap gap-1">
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
                             <MemberBadge memberType={player.memberType} />
                             <GoalkeeperBadge preference={player.goalkeeperPreference} />
+                            <span
+                              className={cn(
+                                "rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                                player.checkedInAt
+                                  ? "bg-[rgba(34,197,94,0.14)] text-success"
+                                  : "bg-ink/5 text-muted",
+                              )}
+                            >
+                              {player.checkedInAt
+                                ? `Chegou ${formatTime(player.checkedInAt, settings.timezone)}`
+                                : "Ainda não chegou"}
+                            </span>
                           </div>
                         </div>
-                        {isAdmin ? (
-                          <div className="flex items-center gap-0.5">
-                            {player.userId === user.id ? (
+                        {isAdmin || player.userId === user.id ? (
+                          <div className="flex flex-wrap items-center justify-end gap-0.5">
+                            {player.checkedInAt ? (
                               <ActionButton
-                                action={toggleOrganizerAction}
+                                action={undoCheckInAction}
                                 fields={{ attendanceId: player.attendanceId }}
                                 variant="ghost"
                                 size="icon-sm"
-                                confirmMessage="Marcar você como organizador? Você sai da lista de jogadores e não entra nos times."
-                                title="Só organizar"
+                                confirmMessage={`Desfazer a chegada de ${player.name}?`}
+                                title="Desfazer chegada"
                               >
-                                <UserCog className="h-3.5 w-3.5" aria-hidden />
+                                <Undo2 className="h-3.5 w-3.5" aria-hidden />
                               </ActionButton>
+                            ) : (
+                              <ActionButton
+                                action={checkInRachaAction}
+                                fields={{ attendanceId: player.attendanceId }}
+                                variant="outline"
+                                size="sm"
+                                icon={<LogIn className="h-3.5 w-3.5" aria-hidden />}
+                                confirmMessage={
+                                  player.userId === user.id
+                                    ? "Marcar sua chegada agora? Marque somente quando você estiver no local."
+                                    : `Marcar a chegada de ${player.name} agora? Marque somente quando a pessoa chegar.`
+                                }
+                                confirmLabel="Cheguei"
+                              >
+                                Cheguei
+                              </ActionButton>
+                            )}
+                            {isAdmin ? (
+                              <>
+                                {player.userId === user.id ? (
+                                  <ActionButton
+                                    action={toggleOrganizerAction}
+                                    fields={{ attendanceId: player.attendanceId }}
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    confirmMessage="Marcar você como organizador? Você sai da lista de jogadores e não entra nos times."
+                                    title="Só organizar"
+                                  >
+                                    <UserCog className="h-3.5 w-3.5" aria-hidden />
+                                  </ActionButton>
+                                ) : null}
+                                <ActionButton
+                                  action={adminRemoveAttendanceAction}
+                                  fields={{ attendanceId: player.attendanceId }}
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  confirmMessage={`Remover ${player.name} da lista?`}
+                                  title="Remover presença"
+                                >
+                                  <X className="h-3.5 w-3.5" aria-hidden />
+                                </ActionButton>
+                              </>
                             ) : null}
-                            <ActionButton
-                              action={adminRemoveAttendanceAction}
-                              fields={{ attendanceId: player.attendanceId }}
-                              variant="ghost"
-                              size="icon-sm"
-                              confirmMessage={`Remover ${player.name} da lista?`}
-                              title="Remover presença"
-                            >
-                              <X className="h-3.5 w-3.5" aria-hidden />
-                            </ActionButton>
                           </div>
                         ) : null}
                       </li>

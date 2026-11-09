@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { CalendarDays, Clock, MapPin, Pencil, Users } from "lucide-react";
+import { CalendarDays, Clock, LogIn, MapPin, Pencil, Users } from "lucide-react";
+import { checkInRachaAction } from "@/actions/racha";
 import { AttendanceControls } from "@/components/features/attendance-controls";
 import { AutoRefresh } from "@/components/features/auto-refresh";
 import { OrganizerToggle } from "@/components/features/organizer-toggle";
 import { EventCalendar } from "@/components/features/event-calendar";
 import { ShareEventButton } from "@/components/features/share-event-button";
 import { SurfaceBadge } from "@/components/features/surface-badge";
+import { ActionButton } from "@/components/ui/action-button";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
@@ -279,6 +281,25 @@ export default async function UpcomingPage({
                           block={false}
                         />
                       )}
+                      {eventIsOpen && mine?.status === "CONFIRMED" && !mine.isOrganizer ? (
+                        mine.checkedInAt ? (
+                          <Badge tone="success">
+                            Chegou {formatTime(mine.checkedInAt, settings.timezone)}
+                          </Badge>
+                        ) : (
+                          <ActionButton
+                            action={checkInRachaAction}
+                            fields={{ attendanceId: mine.attendanceId }}
+                            variant="outline"
+                            size="sm"
+                            icon={<LogIn className="h-3.5 w-3.5" aria-hidden />}
+                            confirmMessage="Marcar sua chegada agora? Marque somente quando você estiver no local."
+                            confirmLabel="Cheguei"
+                          >
+                            Cheguei
+                          </ActionButton>
+                        )
+                      ) : null}
                     </div>
                     <div className="ml-auto flex items-center gap-1">
                       <Link

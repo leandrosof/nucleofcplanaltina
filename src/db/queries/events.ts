@@ -339,6 +339,7 @@ export async function getAttendanceMap(userId: string) {
       eventId: attendances.eventId,
       status: attendances.status,
       waitlistPosition: attendances.waitlistPosition,
+      checkedInAt: attendances.checkedInAt,
       isOrganizer: attendances.isOrganizer,
     })
     .from(attendances)

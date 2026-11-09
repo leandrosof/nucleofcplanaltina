@@ -249,7 +249,6 @@ async function createSession(
   await tx
     .update(attendances)
     .set({
-      checkedInAt: sql`coalesce(${attendances.checkedInAt}, ${attendances.createdAt})`,
       rotationStatus: "WAITING",
       queuePosition: null,
       queueTeamId: null,
@@ -260,6 +259,7 @@ async function createSession(
         eq(attendances.eventId, eventId),
         eq(attendances.status, "CONFIRMED"),
         eq(attendances.isOrganizer, false),
+        isNotNull(attendances.checkedInAt),
         ne(attendances.rotationStatus, "LEFT"),
       ),
     );
@@ -304,14 +304,14 @@ async function createSession(
 
   if (fieldPool.length < neededField) {
     throw new AppError(
-      `Faltam ${neededField - fieldPool.length} jogador(es) de linha para abrir ${courtCount} quadra(s) de ${teamSize} + goleiro.`,
+      `Marque a chegada de mais ${neededField - fieldPool.length} jogador(es) de linha para abrir ${courtCount} quadra(s) de ${teamSize} + goleiro.`,
     );
   }
 
   const teamCount = Math.floor(fieldPool.length / teamSize);
   if (teamCount < courtCount * 2) {
     throw new AppError(
-      `São necessários ${courtCount * 2} times completos de ${teamSize} jogadores de linha para abrir ${courtCount} quadra(s).`,
+      `São necessários ${courtCount * 2} times completos de ${teamSize} jogadores de linha com chegada marcada para abrir ${courtCount} quadra(s).`,
     );
   }
 
@@ -853,7 +853,7 @@ export async function checkInRachaAction(
   if (!actor) return fail("Faça login para continuar.");
 
   try {
-    await db.transaction(async (tx) => {
+    const joinedQueue = await db.transaction(async (tx) => {
       const [row] = await tx
         .select()
         .from(attendances)
@@ -867,7 +867,29 @@ export async function checkInRachaAction(
       if (row.status !== "CONFIRMED") {
         throw new AppError("Confirme presença antes de marcar a chegada.");
       }
-      if (row.checkedInAt && row.rotationStatus !== "LEFT") return;
+      if (row.checkedInAt && row.rotationStatus !== "LEFT") return false;
+
+      const [draw] = await tx
+        .select()
+        .from(draws)
+        .where(and(eq(draws.eventId, row.eventId), eq(draws.status, "IN_PROGRESS")))
+        .orderBy(desc(draws.createdAt))
+        .limit(1);
+
+      if (!draw) {
+        await tx
+          .update(attendances)
+          .set({
+            checkedInAt: new Date(),
+            rotationStatus: "IDLE",
+            queuePosition: null,
+            queueTeamId: null,
+            leftAt: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(attendances.id, row.id));
+        return false;
+      }
 
       const [maxRow] = await tx
         .select({ position: sql<number>`max(${attendances.queuePosition})` })
@@ -885,17 +907,74 @@ export async function checkInRachaAction(
         })
         .where(eq(attendances.id, row.id));
 
+      await tryMountAnyCourt(tx, draw, row.eventId);
+      return true;
+    });
+
+    revalidatePath("/", "layout");
+    return success(
+      joinedQueue ? "Chegada registrada. Você entrou na fila." : "Chegada registrada.",
+    );
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function undoCheckInAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = rachaAttendanceSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return fail(firstZodMessage(parsed.error));
+
+  const actor = await getSessionUser();
+  if (!actor) return fail("Faça login para continuar.");
+
+  try {
+    await db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(attendances)
+        .where(eq(attendances.id, parsed.data.attendanceId))
+        .for("update")
+        .limit(1);
+      if (!row) throw new AppError("Presença não encontrada.");
+      if (actor.role !== "ADMIN" && row.userId !== actor.id) {
+        throw new AppError("Você só pode desfazer a sua própria chegada.");
+      }
+
       const [draw] = await tx
         .select()
         .from(draws)
         .where(and(eq(draws.eventId, row.eventId), eq(draws.status, "IN_PROGRESS")))
         .orderBy(desc(draws.createdAt))
         .limit(1);
-      if (draw) await tryMountAnyCourt(tx, draw, row.eventId);
+      if (draw) {
+        throw new AppError("O racha já começou. Use a opção de marcar saída.");
+      }
+
+      await tx
+        .update(attendances)
+        .set({
+          checkedInAt: null,
+          rotationStatus: "IDLE",
+          queuePosition: null,
+          queueTeamId: null,
+          leftAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(attendances.id, row.id));
+    });
+
+    await recordAudit({
+      actorId: actor.id,
+      action: "racha.undo_check_in",
+      entity: "attendance",
+      entityId: parsed.data.attendanceId,
     });
 
     revalidatePath("/", "layout");
-    return success("Chegada registrada.");
+    return success("Chegada desfeita.");
   } catch (error) {
     return actionFailure(error);
   }

@@ -142,6 +142,7 @@ async function run() {
         eventId: upcomingEvent.id,
         userId: user.id,
         status: "CONFIRMED" as const,
+        checkedInAt: new Date(Date.now() - (20 - index) * 60 * 1000),
         createdAt: new Date(Date.now() - (20 - index) * 60 * 1000),
       })),
       ...upcomingWaitlist.map((user, index) => ({

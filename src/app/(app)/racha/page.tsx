@@ -83,6 +83,9 @@ export default async function RachaPage({
   const isAdmin = user.role === "ADMIN";
   const view = selected ? await getRachaView(selected.id) : null;
   const roster = selected ? await getEventRoster(selected.id) : null;
+  const arrivedCount = roster?.confirmed.filter((player) => player.checkedInAt).length ?? 0;
+  const confirmedCount = roster?.confirmed.length ?? 0;
+  const missingArrivals = Math.max(confirmedCount - arrivedCount, 0);
 
   const myAttendance = roster
     ? [...roster.confirmed, ...roster.organizers, ...roster.waitlist].find(
@@ -177,10 +180,19 @@ export default async function RachaPage({
                     </h2>
                     <p className="text-xs text-muted">
                       {formatDateTime(selected.startsAt, settings.timezone)} · {roster.confirmed.length} confirmados
+                      {" · "}
+                      {arrivedCount} chegaram
                     </p>
                   </div>
                   <Badge tone="brand">{settings.defaultTeamSize} por time</Badge>
                 </div>
+
+                {missingArrivals > 0 ? (
+                  <Alert tone="warning">
+                    {missingArrivals} confirmado(s) ainda não marcaram chegada. Só quem marcar{" "}
+                    <strong>Cheguei</strong> entra nos times e na fila.
+                  </Alert>
+                ) : null}
 
                 {isAdmin ? (
                   <ActionForm
@@ -192,7 +204,7 @@ export default async function RachaPage({
                     size="lg"
                     submitIcon={<Play className="h-4 w-4" aria-hidden />}
                   >
-                    <div className="grid max-w-[420px] gap-3 sm:grid-cols-2">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <Label htmlFor="teamSize" required>
                           Jogadores de linha por time
@@ -225,7 +237,8 @@ export default async function RachaPage({
                       </div>
                     </div>
                     <p className="text-xs text-muted">
-                      O sistema usa os jogadores confirmados e monta a primeira partida sozinho. Cada time recebe também 1 goleiro (fixo ou escolhido manualmente).
+                      O sistema usa apenas os jogadores que já marcaram chegada e monta a primeira partida
+                      sozinho. Cada time recebe também 1 goleiro (fixo ou escolhido manualmente).
                     </p>
                   </ActionForm>
                 ) : (
@@ -792,8 +805,8 @@ export default async function RachaPage({
                     Lista do racha
                   </span>
                 }
-                subtitle={`${roster.confirmed.length} confirmados`}
-                defaultOpen={false}
+                subtitle={`${arrivedCount} de ${roster.confirmed.length} chegaram`}
+                defaultOpen={!session}
               >
                 <div className="space-y-2">
                   {isAdmin ? (
@@ -804,6 +817,10 @@ export default async function RachaPage({
                       isAdmin
                     />
                   ) : null}
+                  <p className="rounded-lg border border-line bg-surface-2/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
+                    Marque <span className="font-semibold text-ink">Cheguei</span> somente quando estiver no
+                    local. A chegada é o que entra no racha; a confirmação é só a pré-reserva.
+                  </p>
                   <ul className="divide-y divide-line/60">
                     {roster.confirmed.map((player) => (
                       <li key={player.attendanceId} className="flex items-center gap-2 py-2">
@@ -823,7 +840,7 @@ export default async function RachaPage({
                                 : player.rotationStatus === "LEFT"
                                   ? "Saiu"
                                   : player.checkedInAt
-                                    ? "Presente"
+                                    ? `Chegou ${formatTime(player.checkedInAt, settings.timezone)}`
                                     : "Não chegou"}
                             {player.gamesPlayed > 0 ? ` · ${player.gamesPlayed} jogo(s)` : ""}
                           </p>
@@ -836,6 +853,11 @@ export default async function RachaPage({
                                 fields={{ attendanceId: player.attendanceId }}
                                 variant="ghost"
                                 size="icon-sm"
+                                confirmMessage={
+                                  player.rotationStatus === "LEFT"
+                                    ? `Voltar ${player.name} para a fila?`
+                                    : `Marcar a chegada de ${player.name}? Marque somente quando a pessoa chegar.`
+                                }
                                 title={player.rotationStatus === "LEFT" ? "Voltar para a fila" : "Marcar chegada"}
                               >
                                 <LogIn className="h-3.5 w-3.5" aria-hidden />

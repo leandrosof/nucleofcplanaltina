@@ -4,6 +4,7 @@ import {
   BarChart3,
   CalendarDays,
   Clock,
+  LogIn,
   MapPin,
   Megaphone,
   PenLine,
@@ -16,6 +17,7 @@ import { getSettings } from "@/lib/settings";
 import { getEventRoster, listOperationalEvents } from "@/db/queries/events";
 import { listAnnouncements } from "@/db/queries/announcements";
 import { listLiveGames } from "@/db/queries/games";
+import { checkInRachaAction } from "@/actions/racha";
 import { AttendanceControls } from "@/components/features/attendance-controls";
 import { OrganizerToggle } from "@/components/features/organizer-toggle";
 import { ShareEventButton } from "@/components/features/share-event-button";
@@ -24,6 +26,7 @@ import { GameDurationBadge } from "@/components/features/game-duration";
 import { EventStatusBadge, GameStatusBadge } from "@/components/features/status-badge";
 import { SurfaceBadge } from "@/components/features/surface-badge";
 import { TeamPill } from "@/components/features/team-card";
+import { ActionButton } from "@/components/ui/action-button";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -33,7 +36,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Progress } from "@/components/ui/progress";
 import { StatCard } from "@/components/ui/stat";
 import { cn, firstName, plural } from "@/lib/utils";
-import { countdownLabel, dayParts, formatDateShort, formatDateTime, formatWeekday } from "@/lib/time";
+import { countdownLabel, dayParts, formatDateShort, formatDateTime, formatTime, formatWeekday } from "@/lib/time";
 
 export const metadata = { title: "Início" };
 
@@ -279,6 +282,29 @@ export default async function HomePage() {
                   isOrganizer={organizers.some((row) => row.userId === user.id)}
                 />
               )}
+              {eventIsOpen && mine?.status === "CONFIRMED" && !mine.isOrganizer ? (
+                mine.checkedInAt ? (
+                  <div className="flex justify-center">
+                    <Badge tone="success">
+                      Chegou {formatTime(mine.checkedInAt, settings.timezone)}
+                    </Badge>
+                  </div>
+                ) : (
+                  <div className="flex justify-center">
+                    <ActionButton
+                      action={checkInRachaAction}
+                      fields={{ attendanceId: mine.attendanceId }}
+                      variant="outline"
+                      size="sm"
+                      icon={<LogIn className="h-3.5 w-3.5" aria-hidden />}
+                      confirmMessage="Marcar sua chegada agora? Marque somente quando você estiver no local."
+                      confirmLabel="Cheguei"
+                    >
+                      Cheguei
+                    </ActionButton>
+                  </div>
+                )
+              ) : null}
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted">
                 <Link href={`/presencas?evento=${nextEvent.id}`} className="font-medium text-brand hover:text-ink">
                   Ver lista completa
