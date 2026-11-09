@@ -58,6 +58,7 @@ type PresentRow = {
   queueTeamId: string | null;
   rotationStatus: "IDLE" | "WAITING" | "PLAYING" | "LEFT" | "PAUSED";
   goalkeeperPreference: "FIXED" | "FIELD" | "ANY";
+  checkedInAt: Date | null;
   lastPlayedAt: Date | null;
 };
 
@@ -90,6 +91,7 @@ async function loadPresent(tx: Tx, eventId: string): Promise<PresentRow[]> {
       queueTeamId: attendances.queueTeamId,
       rotationStatus: attendances.rotationStatus,
       goalkeeperPreference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
+      checkedInAt: attendances.checkedInAt,
       lastPlayedAt: attendances.lastPlayedAt,
     })
     .from(attendances)
@@ -267,7 +269,12 @@ async function createSession(
   const present = await loadPresent(tx, eventId);
   const ordered = present
     .slice()
-    .sort((a, b) => a.gamesPlayed - b.gamesPlayed || (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
+    .sort(
+      (a, b) =>
+        a.gamesPlayed - b.gamesPlayed ||
+        (a.checkedInAt?.getTime() ?? 0) - (b.checkedInAt?.getTime() ?? 0) ||
+        (a.queuePosition ?? 0) - (b.queuePosition ?? 0),
+    );
 
   for (let index = 0; index < ordered.length; index += 1) {
     await tx
