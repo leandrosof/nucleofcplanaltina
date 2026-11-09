@@ -869,7 +869,7 @@ export default async function RachaPage({
                                 variant="ghost"
                                 size="sm"
                                 icon={<LogOut className="h-3.5 w-3.5" aria-hidden />}
-                                confirmMessage={`Marcar ${player.name} como saído?`}
+                                confirmMessage={`Marcar a saída de ${player.name}?`}
                               >
                                 Saiu
                               </ActionButton>

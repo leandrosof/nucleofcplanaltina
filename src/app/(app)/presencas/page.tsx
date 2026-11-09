@@ -254,7 +254,7 @@ export default async function AttendancePage({
                                 fields={{ attendanceId: player.attendanceId }}
                                 variant="ghost"
                                 size="icon-sm"
-                                confirmMessage={`Desfazer a chegada de ${player.name}?`}
+                                confirmMessage={`Desfazer a chegada de ${player.name}? Se estiver em uma partida, será substituído pelo próximo da fila.`}
                                 title="Desfazer chegada"
                               >
                                 <Undo2 className="h-3.5 w-3.5" aria-hidden />
