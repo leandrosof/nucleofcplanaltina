@@ -851,27 +851,27 @@ export default async function RachaPage({
                               <ActionButton
                                 action={checkInRachaAction}
                                 fields={{ attendanceId: player.attendanceId }}
-                                variant="ghost"
-                                size="icon-sm"
+                                variant="outline"
+                                size="sm"
+                                icon={<LogIn className="h-3.5 w-3.5" aria-hidden />}
                                 confirmMessage={
                                   player.rotationStatus === "LEFT"
                                     ? `Voltar ${player.name} para a fila?`
                                     : `Marcar a chegada de ${player.name}? Marque somente quando a pessoa chegar.`
                                 }
-                                title={player.rotationStatus === "LEFT" ? "Voltar para a fila" : "Marcar chegada"}
                               >
-                                <LogIn className="h-3.5 w-3.5" aria-hidden />
+                                {player.rotationStatus === "LEFT" ? "Voltar" : "Chegou"}
                               </ActionButton>
                             ) : player.rotationStatus !== "PLAYING" ? (
                               <ActionButton
                                 action={leaveRachaAction}
                                 fields={{ attendanceId: player.attendanceId }}
                                 variant="ghost"
-                                size="icon-sm"
+                                size="sm"
+                                icon={<LogOut className="h-3.5 w-3.5" aria-hidden />}
                                 confirmMessage={`Marcar ${player.name} como saído?`}
-                                title="Marcar saída"
                               >
-                                <LogOut className="h-3.5 w-3.5" aria-hidden />
+                                Saiu
                               </ActionButton>
                             ) : null}
                           </div>
