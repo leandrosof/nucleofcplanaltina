@@ -704,20 +704,35 @@ async function findQueueCandidate(
   tx: Tx,
   eventId: string,
   exclude: Set<string>,
-): Promise<{ userId: string; name: string } | null> {
+  options?: { excludeFixedGoalkeepers?: boolean },
+): Promise<{
+  userId: string;
+  name: string;
+  goalkeeperPreference: "FIXED" | "FIELD" | "ANY";
+} | null> {
+  const filters = [
+    eq(attendances.eventId, eventId),
+    eq(attendances.status, "CONFIRMED"),
+    eq(attendances.rotationStatus, "WAITING"),
+    isNotNull(attendances.checkedInAt),
+    eq(users.active, true),
+  ];
+
+  if (options?.excludeFixedGoalkeepers) {
+    filters.push(
+      sql`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference}) <> 'FIXED'`,
+    );
+  }
+
   const rows = await tx
-    .select({ userId: users.id, name: users.name })
+    .select({
+      userId: users.id,
+      name: users.name,
+      goalkeeperPreference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
+    })
     .from(attendances)
     .innerJoin(users, eq(users.id, attendances.userId))
-    .where(
-      and(
-        eq(attendances.eventId, eventId),
-        eq(attendances.status, "CONFIRMED"),
-        eq(attendances.rotationStatus, "WAITING"),
-        isNotNull(attendances.checkedInAt),
-        eq(users.active, true),
-      ),
-    )
+    .where(and(...filters))
     .orderBy(asc(attendances.gamesPlayed), asc(attendances.queuePosition), asc(attendances.createdAt));
 
   return rows.find((row) => !exclude.has(row.userId)) ?? null;
@@ -1794,7 +1809,11 @@ export async function substitutePlayerAction(
       const candidate = parsed.data.inUserId
         ? (
             await tx
-              .select({ userId: users.id, name: users.name })
+              .select({
+                userId: users.id,
+                name: users.name,
+                goalkeeperPreference: sql<"FIXED" | "FIELD" | "ANY">`coalesce(${attendances.goalkeeperPreference}, ${users.goalkeeperPreference})`,
+              })
               .from(attendances)
               .innerJoin(users, eq(users.id, attendances.userId))
               .where(
@@ -1806,11 +1825,16 @@ export async function substitutePlayerAction(
               )
               .limit(1)
           )[0] ?? null
-        : await findQueueCandidate(tx, game.eventId, exclude);
+        : await findQueueCandidate(tx, game.eventId, exclude, {
+            excludeFixedGoalkeepers: outRow.position === "FIELD",
+          });
       if (!candidate) {
         throw new AppError("Não há jogador na fila. A partida fica pausada até alguém entrar.");
       }
       if (exclude.has(candidate.userId)) throw new AppError("Este jogador já está na partida.");
+      if (outRow.position === "FIELD" && candidate.goalkeeperPreference === "FIXED") {
+        throw new AppError("Escolha um jogador de linha ou GL para substituir na linha.");
+      }
 
       const [inRow] = await tx
         .select()
@@ -2000,7 +2024,9 @@ async function removeFromRacha(
           .where(eq(gamePlayers.gameId, game.id))
       ).map((item) => item.userId),
     );
-    const candidate = await findQueueCandidate(tx, row.eventId, exclude);
+    const candidate = await findQueueCandidate(tx, row.eventId, exclude, {
+      excludeFixedGoalkeepers: playerRow.position === "FIELD",
+    });
 
     if (candidate) {
       await tx.insert(gamePlayers).values({

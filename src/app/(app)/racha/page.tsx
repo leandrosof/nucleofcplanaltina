@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   ArrowRight,
   Flag,
+  Hand,
   LayoutGrid,
   ListOrdered,
   LogIn,
@@ -127,7 +128,10 @@ export default async function RachaPage({
   const sessionHours = view?.sessionAgeHours ?? 0;
   const teamById = new Map((view?.teams ?? []).map((team) => [team.id, team]));
   let nextTeamIndex = view?.teams.length ?? 0;
-  const queueGroups = chunkQueue(view?.queue ?? [], teamSize).map((players, index) => {
+  const queue = view?.queue ?? [];
+  const fixedQueue = queue.filter((player) => player.goalkeeperPreference === "FIXED");
+  const fieldQueue = queue.filter((player) => player.goalkeeperPreference !== "FIXED");
+  const queueGroups = chunkQueue(fieldQueue, teamSize).map((players, index) => {
     const blockIds = new Set(
       players
         .map((player) => player.queueTeamId)
@@ -776,12 +780,21 @@ export default async function RachaPage({
                     </span>
                     <CardTitle>Fila de espera</CardTitle>
                   </div>
-                  <Badge tone="warning">{view.queue.length}</Badge>
+                  <div className="flex items-center gap-1.5">
+                    <Badge tone="warning">{fieldQueue.length} na linha</Badge>
+                    {fixedQueue.length > 0 ? (
+                      <Badge tone="brand">{fixedQueue.length} goleiros</Badge>
+                    ) : null}
+                  </div>
                 </CardHeader>
                 <CardBody className="space-y-1.5 pt-2">
-                  {view.queue.length === 0 ? (
+                  {queue.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-muted">
                       Ninguém na fila de espera no momento.
+                    </div>
+                  ) : fieldQueue.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-line p-6 text-center text-xs text-muted">
+                      Nenhum jogador de linha na fila.
                     </div>
                   ) : (
                     <div className="grid gap-2 sm:grid-cols-2">
@@ -798,7 +811,7 @@ export default async function RachaPage({
                             </div>
                             <ul className="space-y-1">
                               {group.players.map((player) => {
-                                const index = view.queue.findIndex((item) => item.userId === player.userId);
+                                const index = queue.findIndex((item) => item.userId === player.userId);
                                 return (
                                   <li key={player.userId} className="flex items-center gap-2 rounded-lg px-1.5 py-1">
                                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-warning-soft text-[10px] font-bold text-warning">
@@ -818,10 +831,13 @@ export default async function RachaPage({
                                         <QueueSwapDialog
                                           attendanceId={player.attendanceId}
                                           playerName={player.name}
-                                          players={view.queue.map((item, position) => ({
+                                          players={fieldQueue.map((item) => ({
                                             attendanceId: item.attendanceId,
                                             name: item.name,
-                                            position: position + 1,
+                                            position:
+                                              queue.findIndex(
+                                                (entry) => entry.attendanceId === item.attendanceId,
+                                              ) + 1,
                                           }))}
                                         />
                                         <ActionButton
@@ -848,6 +864,74 @@ export default async function RachaPage({
                   )}
                 </CardBody>
               </Card>
+
+              {fixedQueue.length > 0 ? (
+                <Card data-testid="racha-fixed-goalkeepers">
+                  <CardHeader>
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgba(245,185,66,0.12)] text-warning">
+                        <Hand className="h-4 w-4" aria-hidden />
+                      </span>
+                      <CardTitle>Goleiros fixos na fila</CardTitle>
+                    </div>
+                    <Badge tone="warning">{fixedQueue.length}</Badge>
+                  </CardHeader>
+                  <CardBody className="space-y-1.5 pt-2">
+                    <p className="text-xs text-muted">
+                      O sorteio distribui um goleiro fixo por time. Eles não entram no agrupamento de
+                      jogadores de linha.
+                    </p>
+                    <ul className="divide-y divide-line/60">
+                      {fixedQueue.map((player) => {
+                        const index = queue.findIndex((item) => item.userId === player.userId);
+                        return (
+                          <li key={player.userId} className="flex items-center gap-2 py-2">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-warning-soft text-[10px] font-bold text-warning">
+                              #{index + 1}
+                            </span>
+                            <span className="shrink-0 rounded bg-brand/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand">
+                              {goalkeeperPreferenceLabel(player.goalkeeperPreference)}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+                              {player.name}
+                            </span>
+                            <span className="shrink-0 rounded-md bg-ink/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted">
+                              {player.gamesPlayed}j
+                            </span>
+                            {isAdmin ? (
+                              <div className="flex items-center gap-0.5">
+                                <QueueSwapDialog
+                                  attendanceId={player.attendanceId}
+                                  playerName={player.name}
+                                  players={fixedQueue.map((item) => ({
+                                    attendanceId: item.attendanceId,
+                                    name: item.name,
+                                    position:
+                                      queue.findIndex(
+                                        (entry) => entry.attendanceId === item.attendanceId,
+                                      ) + 1,
+                                  }))}
+                                />
+                                <ActionButton
+                                  action={leaveRachaAction}
+                                  fields={{ attendanceId: player.attendanceId }}
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="text-muted hover:bg-danger-soft hover:text-danger"
+                                  confirmMessage={`Remover ${player.name} da fila?`}
+                                  title="Remover da fila"
+                                >
+                                  <LogOut className="h-4 w-4" aria-hidden />
+                                </ActionButton>
+                              </div>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </CardBody>
+                </Card>
+              ) : null}
 
               <Disclosure
                 title={
