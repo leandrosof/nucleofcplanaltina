@@ -129,10 +129,16 @@ test("racha: inicia, substitui, finaliza e monta o próximo jogo", async ({ page
   await loginAdmin(page);
   await page.goto("/racha");
 
+  await page.getByRole("button", { name: "+1 vaga" }).click();
+  await expect(page.getByText(/Vaga adicionada\. Agora são \d+ vagas\./)).toBeVisible();
+
   await page.selectOption("#teamSize", "6");
   await page.getByRole("button", { name: "Iniciar racha" }).click();
   await expect(page.getByTestId("racha-current-game")).toBeVisible();
   await expect(page.getByRole("button", { name: "Iniciar partida" })).toBeVisible();
+
+  await page.getByText("Lista do racha").click();
+  await expect(page.getByText("Em jogo").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Iniciar partida" }).click();
   await expect(page.getByTestId("racha-score-a")).toBeVisible();
@@ -392,6 +398,16 @@ test("racha: mudar jogadores por time atualiza a tela sem recarregar", async ({ 
 
   await expect(page.getByText(/Times com 7 jogadores/)).toBeVisible();
   await expect(page.getByText(/· 7 por time/)).toBeVisible();
+});
+
+test("admin adiciona vaga na lista em Presenças", async ({ page }) => {
+  await loginAdmin(page);
+  await page.goto("/presencas");
+
+  const button = page.getByRole("button", { name: "+1 vaga" });
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(page.getByText(/Vaga adicionada\. Agora são \d+ vagas\./)).toBeVisible();
 });
 
 test.describe("celular", () => {

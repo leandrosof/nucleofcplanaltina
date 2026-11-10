@@ -22,6 +22,7 @@ import {
   listOperationalEvents,
 } from "@/db/queries/events";
 import { requireUser } from "@/lib/auth";
+import { canPlayerCheckIn, checkInNotice } from "@/lib/check-in";
 import { getSettings } from "@/lib/settings";
 import { countdownLabel, dayParts, formatDateTime, formatTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -152,7 +153,19 @@ export default async function UpcomingPage({
             const remaining = Math.max(event.maxPlayers - event.reservedCount, 0);
             const isFull = remaining === 0;
             const eventIsOpen = event.status === "SCHEDULED";
-            const isActive = "active" in event && event.active;
+            const isActive = "active" in event ? Boolean(event.active) : false;
+            const checkInOpen = canPlayerCheckIn({
+              event,
+              timeZone: settings.timezone,
+              role: user.role,
+              rachaInProgress: isActive,
+            });
+            const checkInText = checkInNotice({
+              event,
+              timeZone: settings.timezone,
+              isAdmin: user.role === "ADMIN",
+              rachaInProgress: isActive,
+            });
 
             return (
               <Card key={event.id}>
@@ -286,7 +299,7 @@ export default async function UpcomingPage({
                           <Badge tone="success">
                             Chegou {formatTime(mine.checkedInAt, settings.timezone)}
                           </Badge>
-                        ) : (
+                        ) : user.role === "ADMIN" || checkInOpen ? (
                           <ActionButton
                             action={checkInRachaAction}
                             fields={{ attendanceId: mine.attendanceId }}
@@ -298,6 +311,8 @@ export default async function UpcomingPage({
                           >
                             Cheguei
                           </ActionButton>
+                        ) : (
+                          <span className="text-[11px] leading-snug text-muted">{checkInText}</span>
                         )
                       ) : null}
                     </div>

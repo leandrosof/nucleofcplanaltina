@@ -13,6 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
+import { canPlayerCheckIn, checkInNotice } from "@/lib/check-in";
 import { getSettings } from "@/lib/settings";
 import { getEventRoster, listOperationalEvents } from "@/db/queries/events";
 import { listAnnouncements } from "@/db/queries/announcements";
@@ -70,6 +71,22 @@ export default async function HomePage() {
   const capacityTone = isFull ? "success" : remaining <= 3 ? "warning" : "brand";
   const parts = nextEvent ? dayParts(nextEvent.startsAt, settings.timezone) : null;
   const eventIsOpen = Boolean(nextEvent && nextEvent.status === "SCHEDULED");
+  const checkInOpen = nextEvent
+    ? canPlayerCheckIn({
+        event: nextEvent,
+        timeZone: settings.timezone,
+        role: user.role,
+        rachaInProgress: nextEvent.active,
+      })
+    : false;
+  const checkInText = nextEvent
+    ? checkInNotice({
+        event: nextEvent,
+        timeZone: settings.timezone,
+        isAdmin: user.role === "ADMIN",
+        rachaInProgress: nextEvent.active,
+      })
+    : "";
 
   return (
     <div className="stagger space-y-5">
@@ -289,7 +306,7 @@ export default async function HomePage() {
                       Chegou {formatTime(mine.checkedInAt, settings.timezone)}
                     </Badge>
                   </div>
-                ) : (
+                ) : user.role === "ADMIN" || checkInOpen ? (
                   <div className="flex justify-center">
                     <ActionButton
                       action={checkInRachaAction}
@@ -303,6 +320,8 @@ export default async function HomePage() {
                       Cheguei
                     </ActionButton>
                   </div>
+                ) : (
+                  <p className="text-center text-xs leading-relaxed text-muted">{checkInText}</p>
                 )
               ) : null}
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted">

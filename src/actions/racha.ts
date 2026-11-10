@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db/client";
 import {
@@ -31,8 +31,11 @@ import {
 } from "@/lib/racha";
 import { shuffle } from "@/lib/draw";
 import { assignGoalkeepers } from "@/lib/goalkeepers";
+import { getCheckInWindow } from "@/lib/check-in";
 import { getSessionUser } from "@/lib/session";
+import { getSettings } from "@/lib/settings";
 import { teamVisualForIndex } from "@/lib/teams";
+import { formatTime } from "@/lib/time";
 import {
   eventIdSchema,
   finalizeMatchSchema,
@@ -774,6 +777,7 @@ export async function addToRachaAction(
   const actor = await getSessionUser();
   if (!actor || actor.role !== "ADMIN") return fail("Ação restrita a administradores.");
 
+  let capacityNote = "";
   try {
     await db.transaction(async (tx) => {
       const [event] = await tx
@@ -784,10 +788,14 @@ export async function addToRachaAction(
         .limit(1);
       if (!event) throw new AppError("Evento não encontrado.");
 
-      const [maxRow] = await tx
-        .select({ position: sql<number>`max(${attendances.queuePosition})` })
-        .from(attendances)
-        .where(eq(attendances.eventId, event.id));
+      const [target] = await tx
+        .select({ id: users.id, name: users.name, active: users.active })
+        .from(users)
+        .where(eq(users.id, parsed.data.userId))
+        .limit(1);
+      if (!target || !target.active) {
+        throw new AppError("Jogador não encontrado ou inativo.");
+      }
 
       const [existing] = await tx
         .select()
@@ -806,9 +814,9 @@ export async function addToRachaAction(
           .set({
             status: "CONFIRMED",
             isOrganizer: false,
-            checkedInAt: new Date(),
-            rotationStatus: "WAITING",
-            queuePosition: Number(maxRow?.position ?? 0) + 1,
+            checkedInAt: null,
+            rotationStatus: "IDLE",
+            queuePosition: null,
             queueTeamId: null,
             leftAt: null,
             updatedAt: new Date(),
@@ -819,19 +827,34 @@ export async function addToRachaAction(
           eventId: event.id,
           userId: parsed.data.userId,
           status: "CONFIRMED",
-          checkedInAt: new Date(),
-          rotationStatus: "WAITING",
-          queuePosition: Number(maxRow?.position ?? 0) + 1,
+          checkedInAt: null,
+          rotationStatus: "IDLE",
+          queuePosition: null,
         });
       }
 
-      const [draw] = await tx
-        .select()
-        .from(draws)
-        .where(and(eq(draws.eventId, event.id), eq(draws.status, "IN_PROGRESS")))
-        .orderBy(desc(draws.createdAt))
-        .limit(1);
-      if (draw) await tryMountAnyCourt(tx, draw, event.id);
+      const [reservedRow] = await tx
+        .select({ total: count() })
+        .from(attendances)
+        .where(
+          and(
+            eq(attendances.eventId, event.id),
+            eq(attendances.status, "CONFIRMED"),
+            eq(attendances.isOrganizer, false),
+          ),
+        );
+      const reservedTotal = Number(reservedRow?.total ?? 0);
+      if (reservedTotal > 200) {
+        throw new AppError("O limite máximo de 200 vagas já foi atingido.");
+      }
+      if (reservedTotal > event.maxPlayers) {
+        await tx
+          .update(events)
+          .set({ maxPlayers: reservedTotal, updatedAt: new Date() })
+          .where(eq(events.id, event.id));
+        capacityNote = ` Lista ampliada para ${reservedTotal} vagas.`;
+      }
+
     });
 
     await recordAudit({
@@ -843,7 +866,7 @@ export async function addToRachaAction(
     });
 
     revalidatePath("/", "layout");
-    return success("Jogador adicionado à lista e à fila.");
+    return success(`Jogador adicionado à lista. Marque a chegada quando chegar.${capacityNote}`);
   } catch (error) {
     return actionFailure(error);
   }
@@ -876,12 +899,41 @@ export async function checkInRachaAction(
       }
       if (row.checkedInAt && row.rotationStatus !== "LEFT") return false;
 
+      const [event] = await tx
+        .select({ startsAt: events.startsAt, endsAt: events.endsAt })
+        .from(events)
+        .where(eq(events.id, row.eventId))
+        .limit(1);
+      if (!event) throw new AppError("Evento não encontrado.");
+
       const [draw] = await tx
         .select()
         .from(draws)
         .where(and(eq(draws.eventId, row.eventId), eq(draws.status, "IN_PROGRESS")))
         .orderBy(desc(draws.createdAt))
         .limit(1);
+
+      if (actor.role !== "ADMIN" && !draw) {
+        const settings = await getSettings();
+        const window = getCheckInWindow(event, settings.timezone);
+        const now = Date.now();
+        if (now < window.opensAt.getTime()) {
+          throw new AppError(
+            `Chegada liberada a partir de ${formatTime(
+              window.opensAt,
+              settings.timezone,
+            )}. Marque somente quando estiver no local.`,
+          );
+        }
+        if (now > window.closesAt.getTime()) {
+          throw new AppError(
+            `A janela de chegada encerrou às ${formatTime(
+              window.closesAt,
+              settings.timezone,
+            )}. Fale com um administrador.`,
+          );
+        }
+      }
 
       if (!draw) {
         await tx
@@ -1640,6 +1692,33 @@ export async function undoRachaAction(
             ),
           );
       }
+
+      const activePlayers = await tx
+        .select({ userId: gamePlayers.userId, teamId: gamePlayers.teamId })
+        .from(gamePlayers)
+        .where(and(eq(gamePlayers.gameId, last.id), isNull(gamePlayers.leftAt)));
+
+      await tx
+        .update(rotationCourts)
+        .set({
+          status: "PLAYING",
+          teamAId: last.teamAId,
+          teamBId: last.teamBId,
+          playerAIds: activePlayers
+            .filter((row) => row.teamId === last.teamAId)
+            .map((row) => row.userId),
+          playerBIds: activePlayers
+            .filter((row) => row.teamId === last.teamBId)
+            .map((row) => row.userId),
+          currentGameId: last.id,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(rotationCourts.sessionId, draw.id),
+            eq(rotationCourts.number, last.court),
+          ),
+        );
     });
 
     await recordAudit({
@@ -1735,8 +1814,30 @@ export async function substitutePlayerAction(
           and(eq(attendances.eventId, game.eventId), eq(attendances.userId, candidate.userId)),
         )
         .limit(1);
-      if (!inRow || inRow.rotationStatus === "LEFT" || inRow.status !== "CONFIRMED") {
-        throw new AppError("O substituto precisa estar confirmado e presente.");
+      if (
+        !inRow ||
+        inRow.status !== "CONFIRMED" ||
+        !inRow.checkedInAt ||
+        inRow.rotationStatus !== "WAITING"
+      ) {
+        throw new AppError("O substituto precisa ter chegado e estar na fila de espera.");
+      }
+
+      const [activeElsewhere] = await tx
+        .select({ id: gamePlayers.id })
+        .from(gamePlayers)
+        .innerJoin(games, eq(games.id, gamePlayers.gameId))
+        .where(
+          and(
+            eq(gamePlayers.userId, candidate.userId),
+            isNull(gamePlayers.leftAt),
+            ne(gamePlayers.gameId, game.id),
+            sql`${games.status} in ('IN_PROGRESS', 'NOT_STARTED')`,
+          ),
+        )
+        .limit(1);
+      if (activeElsewhere) {
+        throw new AppError("Este jogador já está em outra partida.");
       }
 
       if (game.status === "IN_PROGRESS") {
@@ -1765,14 +1866,16 @@ export async function substitutePlayerAction(
       await tx
         .update(attendances)
         .set({
-        rotationStatus: "PLAYING",
-        queuePosition: null,
-        queueTeamId: null,
-        updatedAt: new Date(),
-      })
+          rotationStatus: "PLAYING",
+          queuePosition: null,
+          queueTeamId: null,
+          updatedAt: new Date(),
+        })
         .where(
           and(eq(attendances.eventId, game.eventId), eq(attendances.userId, candidate.userId)),
         );
+
+      await replaceCourtPlayer(tx, game.drawId, game.court, outRow.userId, candidate.userId);
 
       await tx.insert(gameSubstitutions).values({
         gameId: game.id,
@@ -1798,6 +1901,42 @@ export async function substitutePlayerAction(
   } catch (error) {
     return actionFailure(error);
   }
+}
+
+async function replaceCourtPlayer(
+  tx: Tx,
+  drawId: string,
+  court: number,
+  outUserId: string,
+  inUserId: string | null,
+): Promise<void> {
+  const [courtRow] = await tx
+    .select()
+    .from(rotationCourts)
+    .where(
+      and(
+        eq(rotationCourts.sessionId, drawId),
+        eq(rotationCourts.number, court),
+      ),
+    )
+    .limit(1);
+  if (!courtRow) return;
+
+  const replace = (ids: unknown): string[] => {
+    const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+    return inUserId
+      ? list.map((id) => (id === outUserId ? inUserId : id))
+      : list.filter((id) => id !== outUserId);
+  };
+
+  await tx
+    .update(rotationCourts)
+    .set({
+      playerAIds: replace(courtRow.playerAIds),
+      playerBIds: replace(courtRow.playerBIds),
+      updatedAt: new Date(),
+    })
+    .where(eq(rotationCourts.id, courtRow.id));
 }
 
 async function removeFromRacha(
@@ -1890,13 +2029,22 @@ async function removeFromRacha(
         createdById: actorId,
         reason: "Saída do racha",
       });
+      await replaceCourtPlayer(tx, game.drawId, game.court, row.userId, candidate.userId);
       return "Jogador removido e substituído pelo próximo da fila.";
     }
 
     if (game.status === "NOT_STARTED") {
       await tx.delete(games).where(eq(games.id, game.id));
+      await normalizeOrphanPlayers(tx, game.drawId, row.eventId);
       if (draw) await tryMountAnyCourt(tx, draw, row.eventId);
+      await renumberQueue(tx, row.eventId);
+    } else {
+      await tx
+        .update(gamePlayers)
+        .set({ leftAt: new Date() })
+        .where(eq(gamePlayers.id, playerRow.id));
     }
+    await replaceCourtPlayer(tx, game.drawId, game.court, row.userId, null);
     return "Jogador removido. A partida fica pausada até entrar um substituto.";
   }
 
@@ -2099,10 +2247,12 @@ export async function openCourtAction(
       if (courts.length >= 20) throw new AppError("Limite de 20 quadras atingido.");
 
       const present = await loadPresent(tx, draw.eventId);
-      const available = present.filter((row) => row.rotationStatus === "WAITING").length;
+      const available = present.filter(
+        (row) => row.rotationStatus === "WAITING" && row.goalkeeperPreference !== "FIXED",
+      ).length;
       if (available < draw.teamSize * 2) {
         throw new AppError(
-          `Faltam ${draw.teamSize * 2 - available} jogador(es) na fila para abrir outra quadra.`,
+          `Faltam ${draw.teamSize * 2 - available} jogador(es) de linha na fila para abrir outra quadra.`,
         );
       }
 
@@ -2117,7 +2267,10 @@ export async function openCourtAction(
         .set({ courtCount: courts.length + 1 })
         .where(eq(draws.id, draw.id));
 
-      await mountNextForCourt(tx, draw, draw.eventId, number);
+      const mounted = await mountNextForCourt(tx, draw, draw.eventId, number);
+      if (!mounted) {
+        throw new AppError("Não foi possível montar a partida nesta quadra. Verifique a fila.");
+      }
     });
 
     revalidatePath("/", "layout");
@@ -2176,12 +2329,7 @@ export async function closeCourtAction(
         const roster = await tx
           .select({ userId: gamePlayers.userId })
           .from(gamePlayers)
-          .where(eq(gamePlayers.gameId, current.id));
-
-        const courtPlayers = [
-          ...((court.playerAIds as string[] | null) ?? []),
-          ...((court.playerBIds as string[] | null) ?? []),
-        ];
+          .where(and(eq(gamePlayers.gameId, current.id), isNull(gamePlayers.leftAt)));
 
         if (current.status === "IN_PROGRESS") {
           await tx
@@ -2192,10 +2340,11 @@ export async function closeCourtAction(
           await tx.delete(games).where(eq(games.id, current.id));
         }
 
-        await appendPlayersToQueue(tx, draw.eventId, [
-          ...roster.map((row) => row.userId),
-          ...courtPlayers,
-        ]);
+        await appendPlayersToQueue(
+          tx,
+          draw.eventId,
+          roster.map((row) => row.userId),
+        );
       } else {
         await appendPlayersToQueue(tx, draw.eventId, [
           ...((court.playerAIds as string[] | null) ?? []),

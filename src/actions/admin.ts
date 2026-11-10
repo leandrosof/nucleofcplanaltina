@@ -33,6 +33,7 @@ import { absoluteUrl, normalizeEmail } from "@/lib/utils";
 import {
   announcementIdSchema,
   announcementSchema,
+  eventIdSchema,
   eventSchema,
   playerAdminSchema,
   playerAttributesSchema,
@@ -256,6 +257,55 @@ export async function setEventStatusAction(
       FINISHED: "Evento marcado como realizado.",
     };
     return success(labels[status]);
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function increaseEventCapacityAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const actor = await requireAdminActor();
+  if (!actor) return fail("Ação restrita a administradores.");
+
+  const parsed = eventIdSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return fail(firstZodMessage(parsed.error));
+
+  try {
+    const nextMaxPlayers = await db.transaction(async (tx) => {
+      const [event] = await tx
+        .select()
+        .from(events)
+        .where(eq(events.id, parsed.data.eventId))
+        .for("update")
+        .limit(1);
+      if (!event) throw new AppError("Evento não encontrado.");
+      if (event.status !== "SCHEDULED") {
+        throw new AppError("Só é possível aumentar vagas de um evento aberto.");
+      }
+      if (event.maxPlayers >= 200) {
+        throw new AppError("O limite máximo de 200 vagas já foi atingido.");
+      }
+
+      const next = event.maxPlayers + 1;
+      await tx
+        .update(events)
+        .set({ maxPlayers: next, updatedAt: new Date() })
+        .where(eq(events.id, event.id));
+      return next;
+    });
+
+    await recordAudit({
+      actorId: actor.id,
+      action: "event.capacity",
+      entity: "event",
+      entityId: parsed.data.eventId,
+      details: { maxPlayers: nextMaxPlayers },
+    });
+
+    revalidatePath("/", "layout");
+    return success(`Vaga adicionada. Agora são ${nextMaxPlayers} vagas.`);
   } catch (error) {
     return actionFailure(error);
   }

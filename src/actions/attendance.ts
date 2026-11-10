@@ -116,6 +116,10 @@ async function promoteNext(
     .set({
       status: "CONFIRMED",
       waitlistPosition: null,
+      checkedInAt: null,
+      rotationStatus: "IDLE",
+      queuePosition: null,
+      leftAt: null,
       updatedAt: new Date(),
     })
     .where(eq(attendances.id, next.id));
@@ -183,6 +187,10 @@ export async function confirmAttendanceAction(
             .set({
               status: "CONFIRMED",
               waitlistPosition: null,
+              checkedInAt: null,
+              rotationStatus: "IDLE",
+              queuePosition: null,
+              leftAt: null,
               updatedAt: new Date(),
             })
             .where(eq(attendances.id, existing.id));
@@ -214,7 +222,15 @@ export async function confirmAttendanceAction(
       if (existing) {
         await tx
           .update(attendances)
-          .set({ status: "WAITLIST", waitlistPosition: nextPosition, updatedAt: new Date() })
+          .set({
+            status: "WAITLIST",
+            waitlistPosition: nextPosition,
+            checkedInAt: null,
+            rotationStatus: "IDLE",
+            queuePosition: null,
+            leftAt: null,
+            updatedAt: new Date(),
+          })
           .where(eq(attendances.id, existing.id));
       } else {
         await tx.insert(attendances).values({
@@ -379,62 +395,52 @@ export async function adminAddAttendanceAction(
         );
       const reservedTotal = Number(reservedRow?.total ?? 0);
 
-      if (reservedTotal < event.maxPlayers) {
-        if (existing) {
-          await tx
-            .update(attendances)
-            .set({
-              status: "CONFIRMED",
-              waitlistPosition: null,
-              updatedAt: new Date(),
-            })
-            .where(eq(attendances.id, existing.id));
-        } else {
-          await tx.insert(attendances).values({
-            eventId: event.id,
-            userId: target.id,
-            status: "CONFIRMED",
-          });
-        }
-        return {
-          message: `${target.name} confirmado no evento.`,
-          email: { kind: "confirmed" as const },
-          target,
-        };
+      if (reservedTotal >= 200) {
+        throw new AppError("O limite máximo de 200 vagas já foi atingido.");
       }
-
-      const [maxRow] = await tx
-        .select({ position: sql<number>`max(${attendances.waitlistPosition})` })
-        .from(attendances)
-        .where(and(eq(attendances.eventId, event.id), eq(attendances.status, "WAITLIST")));
-      const nextPosition = Number(maxRow?.position ?? 0) + 1;
+      const nextMaxPlayers = Math.max(event.maxPlayers, reservedTotal + 1);
+      if (nextMaxPlayers !== event.maxPlayers) {
+        await tx
+          .update(events)
+          .set({ maxPlayers: nextMaxPlayers, updatedAt: new Date() })
+          .where(eq(events.id, event.id));
+      }
 
       if (existing) {
         await tx
           .update(attendances)
-          .set({ status: "WAITLIST", waitlistPosition: nextPosition, updatedAt: new Date() })
+          .set({
+            status: "CONFIRMED",
+            waitlistPosition: null,
+            checkedInAt: null,
+            rotationStatus: "IDLE",
+            queuePosition: null,
+            leftAt: null,
+            updatedAt: new Date(),
+          })
           .where(eq(attendances.id, existing.id));
       } else {
         await tx.insert(attendances).values({
           eventId: event.id,
           userId: target.id,
-          status: "WAITLIST",
-          waitlistPosition: nextPosition,
+          status: "CONFIRMED",
         });
       }
       return {
-        message: `Vagas esgotadas. ${target.name} entrou na fila de espera (${nextPosition}º).`,
-        email: { kind: "waitlist" as const, position: nextPosition },
+        message:
+          nextMaxPlayers !== event.maxPlayers
+            ? `${target.name} confirmado no evento. Lista ampliada para ${nextMaxPlayers} vagas.`
+            : `${target.name} confirmado no evento.`,
+        email: { kind: "confirmed" as const },
         target,
       };
     });
 
     if (result.email && eventForEmail) {
       await queueAttendanceStatusEmail({
-        kind: result.email.kind,
+        kind: "confirmed",
         user: { name: result.target.name, email: result.target.email },
         event: eventForEmail,
-        position: "position" in result.email ? result.email.position : undefined,
       });
     }
 
@@ -566,8 +572,16 @@ export async function adminPromoteAttendanceAction(
           ),
         );
 
-      if (Number(reservedRow?.total ?? 0) >= event.maxPlayers) {
-        throw new AppError("Não há vagas. Aumente o limite ou cancele alguém primeiro.");
+      const reservedTotal = Number(reservedRow?.total ?? 0);
+      if (reservedTotal >= 200) {
+        throw new AppError("O limite máximo de 200 vagas já foi atingido.");
+      }
+      const nextMaxPlayers = Math.max(event.maxPlayers, reservedTotal + 1);
+      if (nextMaxPlayers !== event.maxPlayers) {
+        await tx
+          .update(events)
+          .set({ maxPlayers: nextMaxPlayers, updatedAt: new Date() })
+          .where(eq(events.id, event.id));
       }
 
       await tx
@@ -575,12 +589,19 @@ export async function adminPromoteAttendanceAction(
         .set({
           status: "CONFIRMED",
           waitlistPosition: null,
+          checkedInAt: null,
+          rotationStatus: "IDLE",
+          queuePosition: null,
+          leftAt: null,
           updatedAt: new Date(),
         })
         .where(eq(attendances.id, row.attendance.id));
       await renumberWaitlist(tx, event.id);
       return {
-        message: `${row.name} agora está confirmado.`,
+        message:
+          nextMaxPlayers !== event.maxPlayers
+            ? `${row.name} agora está confirmado. Lista ampliada para ${nextMaxPlayers} vagas.`
+            : `${row.name} agora está confirmado.`,
         user: { name: row.name, email: row.email },
       };
     });
@@ -668,7 +689,8 @@ export async function toggleOrganizerAction(
   if (!actor) return fail("Sua sessão expirou. Entre novamente.");
 
   try {
-    const message = await db.transaction(async (tx) => {
+    let eventForEmail: AttendanceEmailEvent | null = null;
+    const result = await db.transaction(async (tx) => {
       const [row] = await tx
         .select()
         .from(attendances)
@@ -679,6 +701,20 @@ export async function toggleOrganizerAction(
       if (actor.role !== "ADMIN" && row.userId !== actor.id) {
         throw new AppError("Você só pode alterar a sua própria presença.");
       }
+
+      const [event] = await tx
+        .select()
+        .from(events)
+        .where(eq(events.id, row.eventId))
+        .for("update")
+        .limit(1);
+      if (!event) throw new AppError("Evento não encontrado.");
+      eventForEmail = {
+        title: event.title,
+        startsAt: event.startsAt,
+        venueName: event.venueName,
+        publicToken: event.publicToken,
+      };
 
       if (!row.isOrganizer) {
         const [activeGame] = await tx
@@ -706,28 +742,77 @@ export async function toggleOrganizerAction(
             updatedAt: new Date(),
           })
           .where(eq(attendances.id, row.id));
-        return "Agora você está apenas organizando.";
+
+        const promoted = await promoteNext(tx, row.eventId);
+        return {
+          message: promoted
+            ? `Agora você está apenas organizando. ${promoted.name} entrou na lista no seu lugar.`
+            : "Agora você está apenas organizando.",
+          promoted,
+        };
       }
 
-      const [maxRow] = await tx
-        .select({ position: sql<number>`max(${attendances.queuePosition})` })
+      const [reservedRow] = await tx
+        .select({ total: count() })
         .from(attendances)
-        .where(eq(attendances.eventId, row.eventId));
+        .where(
+          and(
+            eq(attendances.eventId, event.id),
+            eq(attendances.status, "CONFIRMED"),
+            eq(attendances.isOrganizer, false),
+          ),
+        );
+      const reservedTotal = Number(reservedRow?.total ?? 0);
+      if (reservedTotal >= 200) {
+        throw new AppError("O limite máximo de 200 vagas já foi atingido.");
+      }
+      const nextMaxPlayers = Math.max(event.maxPlayers, reservedTotal + 1);
+      if (nextMaxPlayers !== event.maxPlayers) {
+        await tx
+          .update(events)
+          .set({ maxPlayers: nextMaxPlayers, updatedAt: new Date() })
+          .where(eq(events.id, event.id));
+      }
+
+      let queuePosition: number | null = null;
+      if (row.checkedInAt) {
+        const [maxRow] = await tx
+          .select({ position: sql<number>`max(${attendances.queuePosition})` })
+          .from(attendances)
+          .where(eq(attendances.eventId, row.eventId));
+        queuePosition = Number(maxRow?.position ?? 0) + 1;
+      }
 
       await tx
         .update(attendances)
         .set({
           isOrganizer: false,
           status: "CONFIRMED",
-          checkedInAt: row.checkedInAt ?? new Date(),
-          rotationStatus: "WAITING",
-          queuePosition: Number(maxRow?.position ?? 0) + 1,
+          checkedInAt: row.checkedInAt,
+          rotationStatus: row.checkedInAt ? "WAITING" : "IDLE",
+          queuePosition,
           leftAt: null,
           updatedAt: new Date(),
         })
         .where(eq(attendances.id, row.id));
-      return "Você voltou para a lista de jogadores.";
+      return {
+        message:
+          nextMaxPlayers !== event.maxPlayers
+            ? `Você voltou para a lista de jogadores. Lista ampliada para ${nextMaxPlayers} vagas.`
+            : row.checkedInAt
+              ? "Você voltou para a lista de jogadores."
+              : "Você voltou para a lista de jogadores. Marque a chegada quando chegar.",
+        promoted: null,
+      };
     });
+
+    if (result.promoted && eventForEmail) {
+      await queueAttendanceStatusEmail({
+        kind: "confirmed",
+        user: { name: result.promoted.name, email: result.promoted.email },
+        event: eventForEmail,
+      });
+    }
 
     await recordAudit({
       actorId: actor.id,
@@ -737,7 +822,7 @@ export async function toggleOrganizerAction(
     });
 
     revalidatePath("/", "layout");
-    return success(message);
+    return success(result.message);
   } catch (error) {
     return actionFailure(error);
   }

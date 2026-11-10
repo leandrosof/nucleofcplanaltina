@@ -7,6 +7,7 @@ import {
   ListOrdered,
   LogIn,
   MapPin,
+  Plus,
   Undo2,
   UserCog,
   UserPlus,
@@ -20,6 +21,7 @@ import {
   adminRemoveAttendanceAction,
   toggleOrganizerAction,
 } from "@/actions/attendance";
+import { increaseEventCapacityAction } from "@/actions/admin";
 import { checkInRachaAction, undoCheckInAction } from "@/actions/racha";
 import { AttendanceControls } from "@/components/features/attendance-controls";
 import { AutoRefresh } from "@/components/features/auto-refresh";
@@ -37,8 +39,9 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Progress } from "@/components/ui/progress";
-import { getEventById, getEventRoster, listOperationalEvents } from "@/db/queries/events";
+import { getEventById, getEventRoster, isRachaInProgress, listOperationalEvents } from "@/db/queries/events";
 import { requireUser } from "@/lib/auth";
+import { canPlayerCheckIn, checkInNotice } from "@/lib/check-in";
 import { getSettings } from "@/lib/settings";
 import { surfaceLabel } from "@/lib/surface";
 import { formatDateTime, formatTime } from "@/lib/time";
@@ -76,6 +79,23 @@ export default async function AttendancePage({
   const isFull = Boolean(selected && roster && reservedCount >= selected.maxPlayers);
   const remaining = selected ? Math.max(selected.maxPlayers - reservedCount, 0) : 0;
   const eventIsOpen = Boolean(selected && selected.status === "SCHEDULED");
+  const rachaInProgress = selected ? await isRachaInProgress(selected.id) : false;
+  const selfCheckInOpen = selected
+    ? canPlayerCheckIn({
+        event: selected,
+        timeZone: settings.timezone,
+        role: user.role,
+        rachaInProgress,
+      })
+    : false;
+  const selfCheckInNotice = selected
+    ? checkInNotice({
+        event: selected,
+        timeZone: settings.timezone,
+        isAdmin,
+        rachaInProgress,
+      })
+    : "";
 
   return (
     <div>
@@ -156,6 +176,17 @@ export default async function AttendancePage({
                 <Badge tone="brand">{arrivedCount} já chegaram</Badge>
                 <Badge tone="warning">{roster.waitlist.length} na espera</Badge>
                 <Badge tone="neutral">{roster.pending.length} sem resposta</Badge>
+                {isAdmin && eventIsOpen ? (
+                  <ActionButton
+                    action={increaseEventCapacityAction}
+                    fields={{ eventId: selected.id }}
+                    variant="outline"
+                    size="sm"
+                    icon={<Plus className="h-3.5 w-3.5" aria-hidden />}
+                  >
+                    +1 vaga
+                  </ActionButton>
+                ) : null}
                 <div className="ml-auto">
                   <ShareAttendanceButton
                     title={selected.title}
@@ -191,11 +222,15 @@ export default async function AttendancePage({
                 />
               )}
 
-              <p className="rounded-xl border border-line bg-surface-2/50 px-3 py-2 text-xs leading-relaxed text-muted">
-                <span className="font-semibold text-ink">Pré-reserva:</span> confirmar presença garante sua
-                vaga na lista. A chegada deve ser marcada em <span className="font-semibold text-ink">Cheguei</span>{" "}
-                somente quando você estiver no local, pois é o que entra no racha.
-              </p>
+              <div className="space-y-1 rounded-xl border border-line bg-surface-2/50 px-3 py-2 text-xs leading-relaxed text-muted">
+                <p>
+                  <span className="font-semibold text-ink">Pré-reserva:</span> confirmar presença garante sua
+                  vaga na lista. A chegada deve ser marcada em{" "}
+                  <span className="font-semibold text-ink">Cheguei</span> somente quando você estiver no
+                  local, pois é o que entra no racha.
+                </p>
+                <p>{selfCheckInNotice}</p>
+              </div>
             </CardBody>
           </Card>
 
@@ -259,7 +294,7 @@ export default async function AttendancePage({
                               >
                                 <Undo2 className="h-3.5 w-3.5" aria-hidden />
                               </ActionButton>
-                            ) : (
+                            ) : isAdmin || selfCheckInOpen ? (
                               <ActionButton
                                 action={checkInRachaAction}
                                 fields={{ attendanceId: player.attendanceId }}
@@ -271,11 +306,11 @@ export default async function AttendancePage({
                                     ? "Marcar sua chegada agora? Marque somente quando você estiver no local."
                                     : `Marcar a chegada de ${player.name} agora? Marque somente quando a pessoa chegar.`
                                 }
-                                confirmLabel="Cheguei"
+                                confirmLabel={player.userId === user.id ? "Cheguei" : "Chegou"}
                               >
-                                Cheguei
+                                {player.userId === user.id ? "Cheguei" : "Chegou"}
                               </ActionButton>
-                            )}
+                            ) : null}
                             {isAdmin ? (
                               <>
                                 {player.userId === user.id ? (

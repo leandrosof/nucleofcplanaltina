@@ -16,6 +16,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
+import { increaseEventCapacityAction } from "@/actions/admin";
 import { adjustScoreAction, setScoreAction } from "@/actions/games";
 import {
   addToRachaAction,
@@ -55,6 +56,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { getEventById, getEventRoster, listOperationalEvents } from "@/db/queries/events";
 import { getRachaView } from "@/db/queries/racha";
 import { requireUser } from "@/lib/auth";
+import { canPlayerCheckIn, checkInNotice } from "@/lib/check-in";
 import { chunkQueue } from "@/lib/racha";
 import { getSettings } from "@/lib/settings";
 import { TEAM_SIZE_OPTIONS, goalkeeperPreferenceLabel, teamVisualForIndex } from "@/lib/teams";
@@ -93,6 +95,22 @@ export default async function RachaPage({
       ) ?? null
     : null;
   const session = view?.session ?? null;
+  const checkInOpen = selected
+    ? canPlayerCheckIn({
+        event: selected,
+        timeZone: settings.timezone,
+        role: user.role,
+        rachaInProgress: Boolean(session),
+      })
+    : false;
+  const checkInText = selected
+    ? checkInNotice({
+        event: selected,
+        timeZone: settings.timezone,
+        isAdmin,
+        rachaInProgress: Boolean(session),
+      })
+    : "";
   const teamSize = view?.teamSize ?? settings.defaultTeamSize;
   const courts = view?.courts ?? [];
   const requestedCourt =
@@ -169,6 +187,73 @@ export default async function RachaPage({
         />
       ) : (
         <div className="space-y-4">
+          <Card>
+            <CardBody className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-ink">Lista e vagas</p>
+                  <p className="text-xs text-muted">
+                    {confirmedCount}/{selected.maxPlayers} confirmados · {arrivedCount} chegaram
+                  </p>
+                </div>
+                {isAdmin && selected.status === "SCHEDULED" ? (
+                  <ActionButton
+                    action={increaseEventCapacityAction}
+                    fields={{ eventId: selected.id }}
+                    variant="outline"
+                    size="sm"
+                    icon={<Plus className="h-3.5 w-3.5" aria-hidden />}
+                  >
+                    +1 vaga
+                  </ActionButton>
+                ) : null}
+              </div>
+
+              {isAdmin && selected.status === "SCHEDULED" ? (
+                roster.pending.length > 0 ? (
+                  <>
+                    <p className="text-xs text-muted">
+                      Adicionar à lista quem já tem cadastro. Depois marque a chegada em{" "}
+                      <span className="font-semibold text-ink">Cheguei</span>. Se a lista estiver cheia, as
+                      vagas aumentam automaticamente.
+                    </p>
+                    <ActionForm
+                      action={addToRachaAction}
+                      hiddenFields={{ eventId: selected.id }}
+                      submitLabel="Adicionar"
+                      pendingLabel="Adicionando..."
+                      variant="secondary"
+                      size="sm"
+                      resetOnSuccess
+                      submitIcon={<UserPlus className="h-3.5 w-3.5" aria-hidden />}
+                    >
+                      <div>
+                        <Label htmlFor="racha-add-player" required>
+                          Jogador cadastrado fora da lista
+                        </Label>
+                        <Select id="racha-add-player" name="userId" defaultValue="" required>
+                          <option value="" disabled>
+                            Selecione o jogador
+                          </option>
+                          {roster.pending.map((player) => (
+                            <option key={player.userId} value={player.userId}>
+                              {player.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    </ActionForm>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted">
+                    Todos os jogadores cadastrados já estão na lista. Use “+1 vaga” se precisar abrir
+                    espaço.
+                  </p>
+                )
+              ) : null}
+            </CardBody>
+          </Card>
+
           {!session ? (
             <>
             <Card>
@@ -255,43 +340,19 @@ export default async function RachaPage({
                 <Badge>{roster.confirmed.length} confirmados</Badge>
               </CardHeader>
               <CardBody className="space-y-2 pt-2">
-                <p className="text-xs text-muted">
-                  Quem já confirmou presença entra na fila automaticamente ao iniciar o racha.
-                </p>
-                {isAdmin && roster.pending.length > 0 ? (
-                  <Disclosure
-                    title="Adicionar jogador"
-                    subtitle={`${roster.pending.length} jogador(es) sem resposta`}
-                  >
-                    <ul className="grid gap-1 sm:grid-cols-2">
-                      {roster.pending.map((player) => (
-                        <li
-                          key={player.userId}
-                          className="flex items-center gap-2 rounded-lg px-1.5 py-1.5"
-                        >
-                          <Avatar
-                            userId={player.userId}
-                            name={player.name}
-                            version={player.avatarUpdatedAt}
-                            size="sm"
-                          />
-                          <span className="min-w-0 flex-1 truncate text-sm text-muted">
-                            {player.name}
-                          </span>
-                          <ActionButton
-                            action={addToRachaAction}
-                            fields={{ eventId: selected.id, userId: player.userId }}
-                            variant="outline"
-                            size="sm"
-                            icon={<UserPlus className="h-3.5 w-3.5" aria-hidden />}
-                          >
-                            Adicionar
-                          </ActionButton>
-                        </li>
-                      ))}
-                    </ul>
-                  </Disclosure>
-                ) : null}
+                <div className="space-y-1 rounded-lg border border-line bg-surface-2/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
+                  <p>{checkInText}</p>
+                  <p>
+                    Só quem marcar <span className="font-semibold text-ink">Cheguei</span> entra na fila
+                    ao iniciar o racha.
+                  </p>
+                </div>
+                <Link
+                  href={`/presencas?evento=${selected.id}`}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                >
+                  Marcar chegadas em Presenças
+                </Link>
               </CardBody>
             </Card>
             </>
@@ -818,10 +879,13 @@ export default async function RachaPage({
                       isAdmin
                     />
                   ) : null}
-                  <p className="rounded-lg border border-line bg-surface-2/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
-                    Marque <span className="font-semibold text-ink">Cheguei</span> somente quando estiver no
-                    local. A chegada é o que entra no racha; a confirmação é só a pré-reserva.
-                  </p>
+                  <div className="space-y-1 rounded-lg border border-line bg-surface-2/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
+                    <p>{checkInText}</p>
+                    <p>
+                      Marque <span className="font-semibold text-ink">Cheguei</span> somente quando estiver no
+                      local. A chegada é o que entra no racha; a confirmação é só a pré-reserva.
+                    </p>
+                  </div>
                   <ul className="divide-y divide-line/60">
                     {roster.confirmed.map((player) => (
                       <li key={player.attendanceId} className="flex items-center gap-2 py-2">
@@ -835,7 +899,7 @@ export default async function RachaPage({
                           <p className="truncate text-sm text-ink">{player.name}</p>
                           <p className="text-[10px] uppercase tracking-wider text-muted">
                             {onCourtIds.has(player.userId)
-                              ? "Em quadra"
+                              ? "Em jogo"
                               : player.rotationStatus === "WAITING"
                                 ? "Na fila"
                                 : player.rotationStatus === "LEFT"
@@ -849,20 +913,22 @@ export default async function RachaPage({
                         {isAdmin || player.userId === user.id ? (
                           <div className="flex items-center gap-0.5">
                             {!player.checkedInAt || player.rotationStatus === "LEFT" ? (
-                              <ActionButton
-                                action={checkInRachaAction}
-                                fields={{ attendanceId: player.attendanceId }}
-                                variant="outline"
-                                size="sm"
-                                icon={<LogIn className="h-3.5 w-3.5" aria-hidden />}
-                                confirmMessage={
-                                  player.rotationStatus === "LEFT"
-                                    ? `Voltar ${player.name} para a fila?`
-                                    : `Marcar a chegada de ${player.name}? Marque somente quando a pessoa chegar.`
-                                }
-                              >
-                                {player.rotationStatus === "LEFT" ? "Voltar" : "Chegou"}
-                              </ActionButton>
+                              isAdmin || checkInOpen ? (
+                                <ActionButton
+                                  action={checkInRachaAction}
+                                  fields={{ attendanceId: player.attendanceId }}
+                                  variant="outline"
+                                  size="sm"
+                                  icon={<LogIn className="h-3.5 w-3.5" aria-hidden />}
+                                  confirmMessage={
+                                    player.rotationStatus === "LEFT"
+                                      ? `Voltar ${player.name} para a fila?`
+                                      : `Marcar a chegada de ${player.name}? Marque somente quando a pessoa chegar.`
+                                  }
+                                >
+                                  {player.rotationStatus === "LEFT" ? "Voltar" : "Chegou"}
+                                </ActionButton>
+                              ) : null
                             ) : player.rotationStatus !== "PLAYING" ? (
                               <ActionButton
                                 action={leaveRachaAction}
@@ -881,37 +947,6 @@ export default async function RachaPage({
                     ))}
                   </ul>
 
-                  {isAdmin && roster.pending.length > 0 ? (
-                    <Disclosure title="Adicionar jogador à lista" subtitle={`${roster.pending.length} jogador(es) sem resposta`}>
-                      <ul className="grid gap-1 sm:grid-cols-2">
-                        {roster.pending.map((player) => (
-                          <li
-                            key={player.userId}
-                            className="flex items-center gap-2 rounded-lg px-1.5 py-1.5"
-                          >
-                            <Avatar
-                              userId={player.userId}
-                              name={player.name}
-                              version={player.avatarUpdatedAt}
-                              size="sm"
-                            />
-                            <span className="min-w-0 flex-1 truncate text-sm text-muted">
-                              {player.name}
-                            </span>
-                            <ActionButton
-                              action={addToRachaAction}
-                              fields={{ eventId: selected.id, userId: player.userId }}
-                              variant="outline"
-                              size="sm"
-                              icon={<UserPlus className="h-3.5 w-3.5" aria-hidden />}
-                            >
-                              Adicionar
-                            </ActionButton>
-                          </li>
-                        ))}
-                      </ul>
-                    </Disclosure>
-                  ) : null}
                 </div>
               </Disclosure>
 

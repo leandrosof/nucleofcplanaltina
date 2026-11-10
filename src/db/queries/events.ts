@@ -68,6 +68,15 @@ export async function getEventById(eventId: string): Promise<EventSummary | null
   return summary;
 }
 
+export async function isRachaInProgress(eventId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: draws.id })
+    .from(draws)
+    .where(and(eq(draws.eventId, eventId), eq(draws.status, "IN_PROGRESS")))
+    .limit(1);
+  return Boolean(row);
+}
+
 export async function getEventByPublicToken(token: string): Promise<EventSummary | null> {
   const rows = await db.select().from(events).where(eq(events.publicToken, token)).limit(1);
   if (!rows[0]) return null;

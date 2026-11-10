@@ -29,7 +29,7 @@ export function OrganizerToggle({
   const description = !attendanceId
     ? "Você ainda não entrou na lista. Ative para jogar."
     : playing
-      ? "Você está no time e entra na fila."
+      ? "Você está na lista de jogadores."
       : "Você está só organizando.";
 
   function handleChange(checked: boolean) {

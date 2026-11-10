@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../client";
 import { attendances, drawTeams, draws, gamePlayers, games, rotationCourts, users } from "../schema";
 import type { Draw, DrawTeam } from "../schema";
@@ -159,7 +159,7 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
               eq(attendances.userId, gamePlayers.userId),
             ),
           )
-          .where(inArray(gamePlayers.gameId, gameIds))
+          .where(and(inArray(gamePlayers.gameId, gameIds), isNull(gamePlayers.leftAt)))
           .orderBy(asc(users.name))
       : [];
 

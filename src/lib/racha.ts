@@ -163,7 +163,7 @@ export function substitutePlayer(
     throw new Error("Substituto inválido.");
   }
   if (lineup.sideA.includes(inUserId) || lineup.sideB.includes(inUserId)) {
-    throw new Error("O substituto já está em quadra.");
+    throw new Error("O substituto já está em jogo.");
   }
   if (!lineup.queue.includes(inUserId)) {
     throw new Error("O substituto precisa estar na fila de espera.");
