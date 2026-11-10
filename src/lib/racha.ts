@@ -108,9 +108,7 @@ export function planNextMatch(input: {
   }));
 
   const rotateAll =
-    rule === "ROTATE_ALL" ||
-    rule === "ARRIVAL_QUEUE" ||
-    winnerIds.length !== teamSize;
+    rule === "ROTATE_ALL" || rule === "ARRIVAL_QUEUE" || winnerIds.length > teamSize;
 
   if (rotateAll) {
     const ordered = orderQueue(
@@ -133,14 +131,20 @@ export function planNextMatch(input: {
   const candidates = [...waiting, ...appendedLosers].sort(
     (a, b) => a.queuePosition - b.queuePosition,
   );
-  if (candidates.length < teamSize) {
-    return { ok: false, missing: teamSize - candidates.length };
+
+  const winnerFill = Math.max(0, teamSize - winnerIds.length);
+  const fillers = orderQueue(candidates, rule).slice(0, winnerFill);
+  const fillerIds = new Set(fillers.map((player) => player.userId));
+  const remaining = candidates.filter((player) => !fillerIds.has(player.userId));
+
+  if (remaining.length < teamSize) {
+    return { ok: false, missing: teamSize - remaining.length };
   }
 
-  const opponent = orderQueue(candidates, rule).slice(0, teamSize);
+  const opponent = orderQueue(remaining, rule).slice(0, teamSize);
 
   const selected = new Set(opponent.map((player) => player.userId));
-  const queue = candidates
+  const queue = remaining
     .filter((player) => !selected.has(player.userId))
     .sort((a, b) => a.queuePosition - b.queuePosition)
     .map((player) => player.userId);
@@ -148,7 +152,7 @@ export function planNextMatch(input: {
   return {
     ok: true,
     winnerStayed: true,
-    sideA: [...winnerIds],
+    sideA: [...winnerIds, ...fillers.map((player) => player.userId)],
     sideB: opponent.map((player) => player.userId),
     queue,
   };

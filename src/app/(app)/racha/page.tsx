@@ -22,7 +22,6 @@ import {
   addToRachaAction,
   checkInRachaAction,
   endRachaAction,
-  finalizeMatchAction,
   leaveRachaAction,
   mixNextMatchAction,
   openCourtAction,
@@ -36,6 +35,7 @@ import {
 } from "@/actions/racha";
 import { AutoRefresh } from "@/components/features/auto-refresh";
 import { CloseCourtDialog } from "@/components/features/close-court-dialog";
+import { FinalizeMatchDialog } from "@/components/features/finalize-match-dialog";
 import { EventPicker } from "@/components/features/event-picker";
 import { OrganizerToggle } from "@/components/features/organizer-toggle";
 import { QueueSwapDialog } from "@/components/features/queue-swap-dialog";
@@ -672,26 +672,12 @@ export default async function RachaPage({
                     ) : null}
 
                     {isAdmin && game.status === "IN_PROGRESS" ? (
-                      <ActionForm
-                        action={finalizeMatchAction}
-                        hiddenFields={{ gameId: game.id }}
-                        submitLabel="Finalizar partida"
-                        variant="success"
-                        size="lg"
-                        confirmMessage="Finalizar a partida e rodar a fila automaticamente?"
-                        submitIcon={<Flag className="h-4 w-4" aria-hidden />}
-                      >
-                        <div>
-                          <Label htmlFor="stayingSide">Se empatar, quem permanece?</Label>
-                          <Select id="stayingSide" name="stayingSide" defaultValue="A">
-                            <option value="A">{game.teamAName}</option>
-                            <option value="B">{game.teamBName}</option>
-                          </Select>
-                          <p className="mt-1 text-[11px] text-muted">
-                            O resultado continua sendo empate no ranking. A escolha só define a rotação.
-                          </p>
-                        </div>
-                      </ActionForm>
+                      <FinalizeMatchDialog
+                        gameId={game.id}
+                        isDraw={game.scoreA === game.scoreB}
+                        teamAName={game.teamAName}
+                        teamBName={game.teamBName}
+                      />
                     ) : null}
 
                     {isAdmin && game.status === "IN_PROGRESS" ? (

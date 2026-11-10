@@ -104,6 +104,49 @@ describe("planNextMatch", () => {
     expect(plan.queue).toEqual(["p4", "p5", "p6"]);
   });
 
+  it("mantém o vencedor incompleto e completa a vaga pela fila", () => {
+    const plan = planNextMatch({
+      rule: "HYBRID",
+      teamSize: 3,
+      players: [
+        { userId: "w1", gamesPlayed: 1, queuePosition: 0 },
+        { userId: "w2", gamesPlayed: 1, queuePosition: 0 },
+        { userId: "q1", gamesPlayed: 0, queuePosition: 1 },
+        { userId: "q2", gamesPlayed: 0, queuePosition: 2 },
+        { userId: "l1", gamesPlayed: 1, queuePosition: 4 },
+        { userId: "l2", gamesPlayed: 1, queuePosition: 5 },
+        { userId: "l3", gamesPlayed: 1, queuePosition: 6 },
+      ],
+      winnerIds: ["w1", "w2"],
+      loserIds: ["l1", "l2", "l3"],
+    });
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.winnerStayed).toBe(true);
+    expect(plan.sideA).toEqual(["w1", "w2", "q1"]);
+    expect(plan.sideB).toEqual(["q2", "l1", "l2"]);
+    expect(plan.queue).toEqual(["l3"]);
+  });
+
+  it("pausa se o vencedor incompleto não puder ser completado", () => {
+    const plan = planNextMatch({
+      rule: "HYBRID",
+      teamSize: 3,
+      players: [
+        { userId: "w1", gamesPlayed: 1, queuePosition: 0 },
+        { userId: "w2", gamesPlayed: 1, queuePosition: 0 },
+        { userId: "l1", gamesPlayed: 1, queuePosition: 0 },
+      ],
+      winnerIds: ["w1", "w2"],
+      loserIds: ["l1"],
+    });
+
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.missing).toBeGreaterThan(0);
+  });
+
   it("não pula quem está na frente da fila por causa de um bloco atrás", () => {
     const plan = planNextMatch({
       rule: "HYBRID",

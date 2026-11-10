@@ -154,7 +154,8 @@ test("racha: inicia, substitui, finaliza e monta o próximo jogo", async ({ page
   await expect(page.getByText(/Placar atualizado/)).toBeVisible();
 
   await page.getByRole("button", { name: "Finalizar partida" }).click();
-  await confirmAction(page);
+  const finalizeDialog = page.getByRole("dialog", { name: "Finalizar partida" });
+  await finalizeDialog.getByRole("button", { name: "Confirmar finalização" }).click();
   await expect(page.getByText("Próxima partida").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Iniciar partida" })).toBeVisible();
 
@@ -175,7 +176,8 @@ test("desfazer resultado restaura a partida anterior", async ({ page }) => {
   await expect(page.getByTestId("racha-score-b")).toHaveText("18");
 
   await page.getByRole("button", { name: "Finalizar partida" }).click();
-  await confirmAction(page);
+  const finalizeDialog = page.getByRole("dialog", { name: "Finalizar partida" });
+  await finalizeDialog.getByRole("button", { name: "Confirmar finalização" }).click();
   await expect(page.getByText("Próxima partida").first()).toBeVisible();
 });
 
