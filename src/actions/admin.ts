@@ -4,7 +4,7 @@ import { and, count, eq, isNull, ne } from "drizzle-orm";
 import { createHash, randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db/client";
-import { announcements, events, passwordResetTokens, seasons, settings, users } from "@/db/schema";
+import { announcements, attendances, events, passwordResetTokens, seasons, settings, users } from "@/db/schema";
 import {
   AppError,
   actionFailure,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/action";
 import { listEmailRecipients, listEventEmailRecipients } from "@/db/queries/email";
 import { recordAudit } from "@/lib/audit";
+import { nextCapacityLimit } from "@/lib/capacity";
 import {
   announcementEmail,
   eventCancelledEmail,
@@ -284,16 +285,33 @@ export async function increaseEventCapacityAction(
       if (event.status !== "SCHEDULED") {
         throw new AppError("Só é possível aumentar vagas de um evento aberto.");
       }
-      if (event.maxPlayers >= 200) {
+
+      const [reservedRow] = await tx
+        .select({ total: count() })
+        .from(attendances)
+        .where(
+          and(
+            eq(attendances.eventId, event.id),
+            eq(attendances.status, "CONFIRMED"),
+            eq(attendances.isOrganizer, false),
+          ),
+        );
+      const reserved = Number(reservedRow?.total ?? 0);
+
+      const capacity = nextCapacityLimit({
+        current: event.maxPlayers,
+        reserved,
+        extra: 1,
+      });
+      if (!capacity.ok) {
         throw new AppError("O limite máximo de 200 vagas já foi atingido.");
       }
 
-      const next = event.maxPlayers + 1;
       await tx
         .update(events)
-        .set({ maxPlayers: next, updatedAt: new Date() })
+        .set({ maxPlayers: capacity.capacity, updatedAt: new Date() })
         .where(eq(events.id, event.id));
-      return next;
+      return capacity.capacity;
     });
 
     await recordAudit({

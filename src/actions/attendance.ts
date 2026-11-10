@@ -13,6 +13,7 @@ import {
   type ActionState,
 } from "@/lib/action";
 import { recordAudit } from "@/lib/audit";
+import { nextCapacityLimit } from "@/lib/capacity";
 import { attendanceConfirmedEmail, attendanceWaitlistEmail } from "@/lib/email";
 import { queueEmail } from "@/lib/notify";
 import { getSessionUser } from "@/lib/session";
@@ -395,14 +396,17 @@ export async function adminAddAttendanceAction(
         );
       const reservedTotal = Number(reservedRow?.total ?? 0);
 
-      if (reservedTotal >= 200) {
+      const capacity = nextCapacityLimit({
+        current: event.maxPlayers,
+        reserved: reservedTotal + 1,
+      });
+      if (!capacity.ok) {
         throw new AppError("O limite máximo de 200 vagas já foi atingido.");
       }
-      const nextMaxPlayers = Math.max(event.maxPlayers, reservedTotal + 1);
-      if (nextMaxPlayers !== event.maxPlayers) {
+      if (capacity.capacity !== event.maxPlayers) {
         await tx
           .update(events)
-          .set({ maxPlayers: nextMaxPlayers, updatedAt: new Date() })
+          .set({ maxPlayers: capacity.capacity, updatedAt: new Date() })
           .where(eq(events.id, event.id));
       }
 
@@ -428,8 +432,8 @@ export async function adminAddAttendanceAction(
       }
       return {
         message:
-          nextMaxPlayers !== event.maxPlayers
-            ? `${target.name} confirmado no evento. Lista ampliada para ${nextMaxPlayers} vagas.`
+          capacity.capacity !== event.maxPlayers
+            ? `${target.name} confirmado no evento. Lista ampliada para ${capacity.capacity} vagas.`
             : `${target.name} confirmado no evento.`,
         email: { kind: "confirmed" as const },
         target,
@@ -573,14 +577,17 @@ export async function adminPromoteAttendanceAction(
         );
 
       const reservedTotal = Number(reservedRow?.total ?? 0);
-      if (reservedTotal >= 200) {
+      const capacity = nextCapacityLimit({
+        current: event.maxPlayers,
+        reserved: reservedTotal + 1,
+      });
+      if (!capacity.ok) {
         throw new AppError("O limite máximo de 200 vagas já foi atingido.");
       }
-      const nextMaxPlayers = Math.max(event.maxPlayers, reservedTotal + 1);
-      if (nextMaxPlayers !== event.maxPlayers) {
+      if (capacity.capacity !== event.maxPlayers) {
         await tx
           .update(events)
-          .set({ maxPlayers: nextMaxPlayers, updatedAt: new Date() })
+          .set({ maxPlayers: capacity.capacity, updatedAt: new Date() })
           .where(eq(events.id, event.id));
       }
 
@@ -599,8 +606,8 @@ export async function adminPromoteAttendanceAction(
       await renumberWaitlist(tx, event.id);
       return {
         message:
-          nextMaxPlayers !== event.maxPlayers
-            ? `${row.name} agora está confirmado. Lista ampliada para ${nextMaxPlayers} vagas.`
+          capacity.capacity !== event.maxPlayers
+            ? `${row.name} agora está confirmado. Lista ampliada para ${capacity.capacity} vagas.`
             : `${row.name} agora está confirmado.`,
         user: { name: row.name, email: row.email },
       };
@@ -763,14 +770,17 @@ export async function toggleOrganizerAction(
           ),
         );
       const reservedTotal = Number(reservedRow?.total ?? 0);
-      if (reservedTotal >= 200) {
+      const capacity = nextCapacityLimit({
+        current: event.maxPlayers,
+        reserved: reservedTotal + 1,
+      });
+      if (!capacity.ok) {
         throw new AppError("O limite máximo de 200 vagas já foi atingido.");
       }
-      const nextMaxPlayers = Math.max(event.maxPlayers, reservedTotal + 1);
-      if (nextMaxPlayers !== event.maxPlayers) {
+      if (capacity.capacity !== event.maxPlayers) {
         await tx
           .update(events)
-          .set({ maxPlayers: nextMaxPlayers, updatedAt: new Date() })
+          .set({ maxPlayers: capacity.capacity, updatedAt: new Date() })
           .where(eq(events.id, event.id));
       }
 
@@ -797,8 +807,8 @@ export async function toggleOrganizerAction(
         .where(eq(attendances.id, row.id));
       return {
         message:
-          nextMaxPlayers !== event.maxPlayers
-            ? `Você voltou para a lista de jogadores. Lista ampliada para ${nextMaxPlayers} vagas.`
+          capacity.capacity !== event.maxPlayers
+            ? `Você voltou para a lista de jogadores. Lista ampliada para ${capacity.capacity} vagas.`
             : row.checkedInAt
               ? "Você voltou para a lista de jogadores."
               : "Você voltou para a lista de jogadores. Marque a chegada quando chegar.",

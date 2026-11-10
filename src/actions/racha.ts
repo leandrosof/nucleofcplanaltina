@@ -30,6 +30,7 @@ import {
   type RachaRule,
 } from "@/lib/racha";
 import { shuffle } from "@/lib/draw";
+import { nextCapacityLimit } from "@/lib/capacity";
 import { assignGoalkeepers } from "@/lib/goalkeepers";
 import { getCheckInWindow } from "@/lib/check-in";
 import { getSessionUser } from "@/lib/session";
@@ -844,15 +845,19 @@ export async function addToRachaAction(
           ),
         );
       const reservedTotal = Number(reservedRow?.total ?? 0);
-      if (reservedTotal > 200) {
+      const capacity = nextCapacityLimit({
+        current: event.maxPlayers,
+        reserved: reservedTotal,
+      });
+      if (!capacity.ok) {
         throw new AppError("O limite máximo de 200 vagas já foi atingido.");
       }
-      if (reservedTotal > event.maxPlayers) {
+      if (capacity.capacity !== event.maxPlayers) {
         await tx
           .update(events)
-          .set({ maxPlayers: reservedTotal, updatedAt: new Date() })
+          .set({ maxPlayers: capacity.capacity, updatedAt: new Date() })
           .where(eq(events.id, event.id));
-        capacityNote = ` Lista ampliada para ${reservedTotal} vagas.`;
+        capacityNote = ` Lista ampliada para ${capacity.capacity} vagas.`;
       }
 
     });

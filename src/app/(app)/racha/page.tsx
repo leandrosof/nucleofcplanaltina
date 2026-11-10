@@ -804,6 +804,9 @@ export default async function RachaPage({
                                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-warning-soft text-[10px] font-bold text-warning">
                                       #{index + 1}
                                     </span>
+                                    <span className="shrink-0 rounded bg-brand/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand">
+                                      {goalkeeperPreferenceLabel(player.goalkeeperPreference)}
+                                    </span>
                                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
                                       {player.name}
                                     </span>
