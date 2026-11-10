@@ -237,6 +237,7 @@ async function run() {
           gameId: game.id,
           teamId: index < 4 ? pastTeams[0].id : pastTeams[1].id,
           userId: user.id,
+          sortOrder: index % 4,
         })),
       ),
     );

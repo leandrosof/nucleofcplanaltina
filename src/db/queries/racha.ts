@@ -160,7 +160,7 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
             ),
           )
           .where(and(inArray(gamePlayers.gameId, gameIds), isNull(gamePlayers.leftAt)))
-          .orderBy(asc(users.name))
+          .orderBy(asc(gamePlayers.teamId), asc(gamePlayers.sortOrder))
       : [];
 
   const teamById = new Map(teams.map((team) => [team.id, team]));

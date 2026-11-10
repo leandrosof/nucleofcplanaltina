@@ -31,7 +31,7 @@ async function getGameParticipants(gameIds: string[]) {
       ),
     )
     .where(inArray(gamePlayers.gameId, gameIds))
-    .orderBy(asc(users.name));
+    .orderBy(asc(gamePlayers.gameId), asc(gamePlayers.teamId), asc(gamePlayers.sortOrder));
 }
 
 export type GameWithTeams = Game & {

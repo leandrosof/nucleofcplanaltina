@@ -313,6 +313,7 @@ export const gamePlayers = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     role: gamePlayerRole("role").notNull().default("STARTER"),
     position: gamePlayerPosition("position").notNull().default("FIELD"),
+    sortOrder: integer("sort_order").notNull().default(0),
     temporaryGoalkeeper: boolean("temporary_goalkeeper").notNull().default(false),
     replacedUserId: uuid("replaced_user_id").references(() => users.id, { onDelete: "set null" }),
     enteredAt: timestamp("entered_at", { withTimezone: true }).notNull().defaultNow(),

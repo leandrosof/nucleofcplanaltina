@@ -407,17 +407,19 @@ async function createSession(
       .returning({ id: games.id });
 
     await tx.insert(gamePlayers).values([
-      ...assignment.sideAFields.map((row) => ({
+      ...assignment.sideAFields.map((row, index) => ({
         gameId: game.id,
         teamId: teamA.id,
         userId: row.userId,
         position: "FIELD" as const,
+        sortOrder: index,
       })),
-      ...assignment.sideBFields.map((row) => ({
+      ...assignment.sideBFields.map((row, index) => ({
         gameId: game.id,
         teamId: teamB.id,
         userId: row.userId,
         position: "FIELD" as const,
+        sortOrder: index,
       })),
       ...(goalkeeperA
         ? [{
@@ -426,6 +428,7 @@ async function createSession(
             userId: goalkeeperA.userId,
             role: assignment.goalkeeperASource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
             position: "GOALKEEPER" as const,
+            sortOrder: assignment.sideAFields.length,
           }]
         : []),
       ...(goalkeeperB
@@ -435,6 +438,7 @@ async function createSession(
             userId: goalkeeperB.userId,
             role: assignment.goalkeeperBSource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
             position: "GOALKEEPER" as const,
+            sortOrder: assignment.sideBFields.length,
           }]
         : []),
     ]);
@@ -618,17 +622,19 @@ async function mountNextForCourt(
     .returning({ id: games.id });
 
   await tx.insert(gamePlayers).values([
-    ...sideAFieldIds.map((userId) => ({
+    ...sideAFieldIds.map((userId, index) => ({
       gameId: game.id,
       teamId: teamA.id,
       userId,
       position: "FIELD" as const,
+      sortOrder: index,
     })),
-    ...sideBFieldIds.map((userId) => ({
+    ...sideBFieldIds.map((userId, index) => ({
       gameId: game.id,
       teamId: teamB.id,
       userId,
       position: "FIELD" as const,
+      sortOrder: index,
     })),
     ...(goalkeeperA
       ? [{
@@ -637,6 +643,7 @@ async function mountNextForCourt(
           userId: goalkeeperA,
           role: assignment.goalkeeperASource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
           position: "GOALKEEPER" as const,
+          sortOrder: sideAFieldIds.length,
         }]
       : []),
     ...(goalkeeperB
@@ -646,6 +653,7 @@ async function mountNextForCourt(
           userId: goalkeeperB,
           role: assignment.goalkeeperBSource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
           position: "GOALKEEPER" as const,
+          sortOrder: sideBFieldIds.length,
         }]
       : []),
   ]);
@@ -1193,7 +1201,8 @@ export async function finalizeMatchAction(
             eq(attendances.userId, gamePlayers.userId),
           ),
         )
-        .where(and(eq(gamePlayers.gameId, game.id), isNull(gamePlayers.leftAt)));
+        .where(and(eq(gamePlayers.gameId, game.id), isNull(gamePlayers.leftAt)))
+        .orderBy(asc(gamePlayers.teamId), asc(gamePlayers.sortOrder));
       const fieldA = roster
         .filter((row) => row.teamId === game.teamAId && row.position === "FIELD")
         .map((row) => row.userId);
@@ -1549,17 +1558,19 @@ export async function finalizeMatchAction(
       }
 
       await tx.insert(gamePlayers).values([
-        ...sideAFieldIds.map((userId) => ({
+        ...sideAFieldIds.map((userId, index) => ({
           gameId: next.id,
           teamId: nextTeamAId,
           userId,
           position: "FIELD" as const,
+          sortOrder: index,
         })),
-        ...sideBFieldIds.map((userId) => ({
+        ...sideBFieldIds.map((userId, index) => ({
           gameId: next.id,
           teamId: nextTeamBId,
           userId,
           position: "FIELD" as const,
+          sortOrder: index,
         })),
         ...(goalkeeperA
           ? [{
@@ -1568,6 +1579,7 @@ export async function finalizeMatchAction(
               userId: goalkeeperA.userId,
               role: assignment.goalkeeperASource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
               position: "GOALKEEPER" as const,
+              sortOrder: sideAFieldIds.length,
             }]
           : []),
         ...(goalkeeperB
@@ -1577,6 +1589,7 @@ export async function finalizeMatchAction(
               userId: goalkeeperB.userId,
               role: assignment.goalkeeperBSource === "TEAM" ? ("STARTER" as const) : ("SUB" as const),
               position: "GOALKEEPER" as const,
+              sortOrder: sideBFieldIds.length,
             }]
           : []),
       ]);
@@ -1921,6 +1934,7 @@ export async function substitutePlayerAction(
         userId: candidate.userId,
         role: "SUB",
         position: outRow.position,
+        sortOrder: outRow.sortOrder,
         temporaryGoalkeeper: outRow.temporaryGoalkeeper,
         replacedUserId: outRow.userId,
       });
@@ -2100,6 +2114,7 @@ async function removeFromRacha(
         userId: candidate.userId,
         role: "SUB",
         position: playerRow.position,
+        sortOrder: playerRow.sortOrder,
         temporaryGoalkeeper: playerRow.temporaryGoalkeeper,
         replacedUserId: row.userId,
       });
@@ -2540,17 +2555,19 @@ export async function mixNextMatchAction(
       await clearUndoStateForGame(tx, initial.drawId, game.id);
       await tx.delete(gamePlayers).where(eq(gamePlayers.gameId, game.id));
       await tx.insert(gamePlayers).values([
-        ...nextA.map((userId) => ({
+        ...nextA.map((userId, index) => ({
           gameId: game.id,
           teamId: game.teamAId,
           userId,
           position: "FIELD" as const,
+          sortOrder: index,
         })),
-        ...nextB.map((userId) => ({
+        ...nextB.map((userId, index) => ({
           gameId: game.id,
           teamId: game.teamBId,
           userId,
           position: "FIELD" as const,
+          sortOrder: index,
         })),
         ...goalkeepersA.map((row) => ({
           gameId: game.id,
@@ -2558,6 +2575,7 @@ export async function mixNextMatchAction(
           userId: row.userId,
           role: row.role,
           position: "GOALKEEPER" as const,
+          sortOrder: nextA.length,
           temporaryGoalkeeper: row.temporaryGoalkeeper,
         })),
         ...goalkeepersB.map((row) => ({
@@ -2566,6 +2584,7 @@ export async function mixNextMatchAction(
           userId: row.userId,
           role: row.role,
           position: "GOALKEEPER" as const,
+          sortOrder: nextB.length,
           temporaryGoalkeeper: row.temporaryGoalkeeper,
         })),
       ]);
@@ -2977,6 +2996,7 @@ export async function setGoalkeeperAction(
         userId: targetUserId,
         role: "SUB",
         position: "GOALKEEPER",
+        sortOrder: roster.length,
         temporaryGoalkeeper: preference.value !== "FIXED",
         replacedUserId: null,
       });
