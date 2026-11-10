@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { VariantProps } from "class-variance-authority";
 import type { ActionState } from "@/lib/action";
 import { cn } from "@/lib/utils";
@@ -44,13 +45,21 @@ export function ActionForm({
 } & VariantProps<typeof buttonVariants>) {
   const [state, formAction] = useActionState(action, null);
   const { toast } = useToast();
+  const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const bypassConfirm = useRef(false);
+  const lastRefreshedState = useRef<ActionState>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (state?.ok && resetOnSuccess) formRef.current?.reset();
   }, [state, resetOnSuccess]);
+
+  useEffect(() => {
+    if (!state?.ok || lastRefreshedState.current === state) return;
+    lastRefreshedState.current = state;
+    router.refresh();
+  }, [state, router]);
 
   useEffect(() => {
     if (!state?.message) return;

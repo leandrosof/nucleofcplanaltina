@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Briefcase, CalendarDays, Clock, MapPin, Pencil, Users } from "lucide-react";
 import { setEventStatusAction, updateEventAction } from "@/actions/admin";
+import { AutoRefresh } from "@/components/features/auto-refresh";
 import { ActionButton } from "@/components/ui/action-button";
 import { ActionForm } from "@/components/ui/action-form";
 import { Alert } from "@/components/ui/alert";
@@ -160,6 +161,7 @@ export default async function AdminEventsPage({
 
   return (
     <div className="space-y-4">
+      <AutoRefresh intervalMs={15000} />
       <Card>
         <CardBody className="flex flex-wrap items-center justify-between gap-3">
           <div>

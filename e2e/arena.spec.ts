@@ -381,6 +381,19 @@ test("jogador exclui a própria conta e perde o acesso", async ({ page }) => {
   await expect(page.getByText("E-mail ou senha inválidos.")).toBeVisible();
 });
 
+test("racha: mudar jogadores por time atualiza a tela sem recarregar", async ({ page }) => {
+  await loginAdmin(page);
+  await page.goto("/racha");
+
+  const teamSizeSelect = page.locator("#racha-team-size");
+  await expect(teamSizeSelect).toBeVisible();
+  await teamSizeSelect.selectOption("7");
+  await page.getByRole("button", { name: "Salvar" }).click();
+
+  await expect(page.getByText(/Times com 7 jogadores/)).toBeVisible();
+  await expect(page.getByText(/· 7 por time/)).toBeVisible();
+});
+
 test.describe("celular", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import type { VariantProps } from "class-variance-authority";
 import type { ActionState } from "@/lib/action";
@@ -43,16 +44,24 @@ export function ActionButton({
 } & VariantProps<typeof buttonVariants>) {
   const [state, formAction, pending] = useActionState(action, null);
   const { toast } = useToast();
+  const router = useRouter();
   const iconOnly = Boolean(size?.startsWith("icon"));
   const renderFeedback = showFeedback ?? !iconOnly;
   const formRef = useRef<HTMLFormElement>(null);
   const bypassConfirm = useRef(false);
+  const lastRefreshedState = useRef<ActionState>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!renderFeedback || !state?.message) return;
     toast({ message: state.message, tone: state.ok ? "success" : "error" });
   }, [renderFeedback, state, toast]);
+
+  useEffect(() => {
+    if (!state?.ok || lastRefreshedState.current === state) return;
+    lastRefreshedState.current = state;
+    router.refresh();
+  }, [state, router]);
 
   return (
     <>

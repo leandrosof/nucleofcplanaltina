@@ -382,6 +382,7 @@ export default async function RachaPage({
                           Jogadores de linha por time
                         </Label>
                         <Select
+                          key={`racha-team-size-${teamSize}`}
                           id="racha-team-size"
                           name="teamSize"
                           defaultValue={String(teamSize)}
