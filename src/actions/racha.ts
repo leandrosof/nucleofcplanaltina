@@ -1410,6 +1410,20 @@ export async function finalizeMatchAction(
             ne(games.id, game.id),
           ),
         );
+      const staleGames = await tx
+        .select({ id: games.id })
+        .from(games)
+        .where(
+          and(
+            eq(games.drawId, draw.id),
+            eq(games.court, game.court),
+            eq(games.status, "NOT_STARTED"),
+          ),
+        );
+      for (const stale of staleGames) {
+        await clearUndoStateForGame(tx, draw.id, stale.id);
+      }
+
       await tx
         .delete(games)
         .where(
@@ -1670,6 +1684,8 @@ export async function undoRachaAction(
       if (!undo?.attendances) throw new AppError("Esta partida não pode ser desfeita.");
 
       if (undo.nextGameId) {
+        await clearUndoStateForGame(tx, draw.id, undo.nextGameId);
+
         const [next] = await tx
           .select()
           .from(games)
@@ -1681,6 +1697,24 @@ export async function undoRachaAction(
           }
           await tx.delete(games).where(eq(games.id, next.id));
         }
+      }
+
+      const [conflict] = await tx
+        .select({ id: games.id })
+        .from(games)
+        .where(
+          and(
+            eq(games.drawId, draw.id),
+            eq(games.court, last.court),
+            sql`${games.status} in ('IN_PROGRESS', 'NOT_STARTED')`,
+            ne(games.id, last.id),
+          ),
+        )
+        .limit(1);
+      if (conflict) {
+        throw new AppError(
+          "Já existe outra partida nesta quadra. Remonte ou remova antes de desfazer.",
+        );
       }
 
       await tx
@@ -1779,6 +1813,9 @@ export async function substitutePlayerAction(
       }
 
       await tx.select().from(draws).where(eq(draws.id, game.drawId)).for("update").limit(1);
+      if (game.status === "NOT_STARTED") {
+        await clearUndoStateForGame(tx, game.drawId, game.id);
+      }
 
       const [outRow] = await tx
         .select()
@@ -1968,6 +2005,34 @@ async function replaceCourtPlayer(
     .where(eq(rotationCourts.id, courtRow.id));
 }
 
+async function clearUndoStateForGame(
+  tx: Tx,
+  drawId: string,
+  gameId: string,
+): Promise<void> {
+  await tx
+    .update(games)
+    .set({ undoState: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(games.drawId, drawId),
+        eq(games.status, "FINISHED"),
+        sql`${games.undoState}->>'nextGameId' = ${gameId}`,
+      ),
+    );
+}
+
+async function clearUndoStateForNotStartedGames(tx: Tx, drawId: string): Promise<void> {
+  const staleGames = await tx
+    .select({ id: games.id })
+    .from(games)
+    .where(and(eq(games.drawId, drawId), eq(games.status, "NOT_STARTED")));
+
+  for (const stale of staleGames) {
+    await clearUndoStateForGame(tx, drawId, stale.id);
+  }
+}
+
 async function removeFromRacha(
   tx: Tx,
   row: typeof attendances.$inferSelect,
@@ -2065,6 +2130,7 @@ async function removeFromRacha(
     }
 
     if (game.status === "NOT_STARTED") {
+      await clearUndoStateForGame(tx, game.drawId, game.id);
       await tx.delete(games).where(eq(games.id, game.id));
       await normalizeOrphanPlayers(tx, game.drawId, row.eventId);
       if (draw) await tryMountAnyCourt(tx, draw, row.eventId);
@@ -2179,6 +2245,7 @@ export async function restartRachaAction(
         .update(draws)
         .set({ status: "FINISHED", finishedAt: new Date() })
         .where(eq(draws.id, current.id));
+      await clearUndoStateForNotStartedGames(tx, current.id);
       await tx
         .delete(games)
         .where(and(eq(games.drawId, current.id), eq(games.status, "NOT_STARTED")));
@@ -2227,6 +2294,7 @@ export async function endRachaAction(
         .limit(1);
       if (live) throw new AppError("Finalize a partida atual antes de encerrar o racha.");
 
+      await clearUndoStateForNotStartedGames(tx, current.id);
       await tx
         .delete(games)
         .where(and(eq(games.drawId, current.id), eq(games.status, "NOT_STARTED")));
@@ -2357,6 +2425,8 @@ export async function closeCourtAction(
         .limit(1);
 
       if (current) {
+        await clearUndoStateForGame(tx, draw.id, current.id);
+
         const roster = await tx
           .select({ userId: gamePlayers.userId })
           .from(gamePlayers)
@@ -2467,6 +2537,7 @@ export async function mixNextMatchAction(
       const nextA = shuffled.slice(0, teamSize);
       const nextB = shuffled.slice(teamSize);
 
+      await clearUndoStateForGame(tx, initial.drawId, game.id);
       await tx.delete(gamePlayers).where(eq(gamePlayers.gameId, game.id));
       await tx.insert(gamePlayers).values([
         ...nextA.map((userId) => ({
@@ -2747,6 +2818,9 @@ export async function setGoalkeeperAction(
       if (!game) throw new AppError("Partida não encontrada.");
       if (game.teamAId !== parsed.data.teamId && game.teamBId !== parsed.data.teamId) {
         throw new AppError("Time não pertence a esta partida.");
+      }
+      if (game.status === "NOT_STARTED") {
+        await clearUndoStateForGame(tx, game.drawId, game.id);
       }
 
       const roster = await tx

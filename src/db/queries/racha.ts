@@ -170,9 +170,11 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
     const teamA = teamById.get(row.teamAId);
     const teamB = teamById.get(row.teamBId);
     const undo = row.undoState as { nextGameId?: string | null } | null;
-    const next = undo?.nextGameId
-      ? gameRows.find((game) => game.id === undo.nextGameId) ?? null
+    const nextGameId = undo?.nextGameId ?? null;
+    const next = nextGameId
+      ? gameRows.find((game) => game.id === nextGameId) ?? null
       : null;
+    const nextIsValid = !nextGameId || next?.status === "NOT_STARTED";
 
     return {
       id: row.id,
@@ -213,7 +215,7 @@ export async function getRachaView(eventId: string): Promise<RachaView> {
       canUndo:
         row.status === "FINISHED" &&
         Boolean(row.undoState) &&
-        (!next || next.status === "NOT_STARTED"),
+        nextIsValid,
     };
   }
 
