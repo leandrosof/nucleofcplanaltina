@@ -1,6 +1,5 @@
 import { Search, UserCog, UserMinus, UserPlus, Users } from "lucide-react";
 import { managePlayerAction, updatePlayerAttributesAction } from "@/actions/admin";
-import { AutoRefresh } from "@/components/features/auto-refresh";
 import { GoalkeeperBadge, MemberBadge } from "@/components/features/member-badge";
 import { ResetPlayerLink } from "@/components/features/reset-player-link";
 import { ActionButton } from "@/components/ui/action-button";
@@ -44,7 +43,6 @@ export default async function AdminPlayersPage({
 
   return (
     <div>
-      <AutoRefresh intervalMs={15000} />
       <PageHeader
         eyebrow={`${players.filter((player) => player.active).length} ativos`}
         title="Jogadores"

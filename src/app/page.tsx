@@ -21,7 +21,14 @@ import { TeamPill } from "@/components/features/team-card";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { listFinishedPublicEvents, listUpcomingEvents, type EventSummary } from "@/db/queries/events";
+import {
+  countFinishedPublicEvents,
+  countUpcomingPublicEvents,
+  getNextPublicEvent,
+  listFinishedPublicEvents,
+  listUpcomingPublicEventsPage,
+  type EventSummary,
+} from "@/db/queries/events";
 import { listRecentFinishedGames } from "@/db/queries/games";
 import { getSessionUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
@@ -261,26 +268,32 @@ export default async function LandingPage({
   const user = await getSessionUser();
   const settings = await getSettings();
   const params = await searchParams;
-  const allUpcoming = (await listUpcomingEvents()).filter((event) => event.publicToken);
-  const allFinished = await listFinishedPublicEvents();
-  const nextEvent =
-    allUpcoming.find((event) => event.maxPlayers > event.reservedCount) ?? allUpcoming[0] ?? null;
-  const upcomingAgenda =
-    allUpcoming.length > 1 && nextEvent
-      ? allUpcoming.filter((event) => event.id !== nextEvent.id)
-      : allUpcoming;
   const agendaMode = params.agenda === "encerrados" ? "finished" : "upcoming";
-  const agendaEvents = agendaMode === "finished" ? allFinished : upcomingAgenda;
-  const totalPages = Math.max(1, Math.ceil(agendaEvents.length / AGENDA_PAGE_SIZE));
+  const nextEvent = await getNextPublicEvent();
+  const nextEventId = nextEvent?.id;
+  const agendaTotal =
+    agendaMode === "finished"
+      ? await countFinishedPublicEvents()
+      : await countUpcomingPublicEvents(new Date(), nextEventId);
+  const totalPages = Math.max(1, Math.ceil(agendaTotal / AGENDA_PAGE_SIZE));
   const requestedPage = Number(typeof params.pagina === "string" ? params.pagina : "1");
   const page = Number.isFinite(requestedPage)
     ? Math.min(Math.max(Math.trunc(requestedPage), 1), totalPages)
     : 1;
-  const pageEvents = agendaEvents.slice((page - 1) * AGENDA_PAGE_SIZE, page * AGENDA_PAGE_SIZE);
+  const agendaOffset = (page - 1) * AGENDA_PAGE_SIZE;
+  const pageEvents =
+    agendaMode === "finished"
+      ? await listFinishedPublicEvents(AGENDA_PAGE_SIZE, agendaOffset)
+      : await listUpcomingPublicEventsPage(
+          new Date(),
+          AGENDA_PAGE_SIZE,
+          agendaOffset,
+          nextEventId,
+        );
   const agendaHref = (nextPage: number) =>
     `/?agenda=${agendaMode === "finished" ? "encerrados" : "proximos"}&pagina=${nextPage}#agenda`;
   const recent = await listRecentFinishedGames(4);
-  const logoUrl = settings.logoData
+  const logoUrl = settings.logoMime
     ? `/api/logo?v=${settings.logoUpdatedAt?.getTime() ?? 0}`
     : settings.logoUrl;
 
@@ -419,7 +432,7 @@ export default async function LandingPage({
                   Encerrados
                 </Link>
                 <span className="ml-1 text-xs text-muted">
-                  {agendaEvents.length} {agendaEvents.length === 1 ? "evento" : "eventos"}
+                  {agendaTotal} {agendaTotal === 1 ? "evento" : "eventos"}
                 </span>
               </div>
             </div>

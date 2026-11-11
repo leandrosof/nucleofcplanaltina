@@ -99,7 +99,7 @@ export default async function AttendancePage({
 
   return (
     <div>
-      <AutoRefresh intervalMs={15000} />
+      <AutoRefresh intervalMs={60000} />
       <PageHeader
         eyebrow="Lista do próximo encontro"
         title="Presenças"

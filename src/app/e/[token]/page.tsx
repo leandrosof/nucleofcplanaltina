@@ -47,7 +47,7 @@ export default async function PublicEventPage({
   ]);
   const results = games.filter((game) => game.status === "FINISHED");
   const otherEvents = upcoming.filter((item) => item.id !== event.id).slice(0, 3);
-  const logoUrl = settings.logoData
+  const logoUrl = settings.logoMime
     ? `/api/logo?v=${settings.logoUpdatedAt?.getTime() ?? 0}`
     : settings.logoUrl;
   const isPast = event.status === "FINISHED" || event.status === "CANCELLED";

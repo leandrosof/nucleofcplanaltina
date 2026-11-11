@@ -2,7 +2,8 @@ import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { logoutAction } from "@/actions/auth";
 import { Avatar } from "@/components/ui/avatar";
-import type { Settings, User } from "@/db/schema";
+import type { SessionUser } from "@/lib/session";
+import type { PublicSettings } from "@/lib/settings";
 import { BottomNav } from "./bottom-nav";
 import { Brand } from "./brand";
 import { OfflineBanner } from "./offline-banner";
@@ -14,12 +15,12 @@ export function AppShell({
   settings,
   children,
 }: {
-  user: User;
-  settings: Settings;
+  user: SessionUser;
+  settings: PublicSettings;
   children: React.ReactNode;
 }) {
   const isAdmin = user.role === "ADMIN";
-  const logoUrl = settings.logoData
+  const logoUrl = settings.logoMime
     ? `/api/logo?v=${settings.logoUpdatedAt?.getTime() ?? 0}`
     : settings.logoUrl;
 

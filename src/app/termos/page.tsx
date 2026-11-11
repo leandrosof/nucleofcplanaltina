@@ -11,7 +11,7 @@ export const metadata = { title: "Termos de Uso" };
 
 export default async function TermsPage() {
   const settings = await getSettings();
-  const logoUrl = settings.logoData
+  const logoUrl = settings.logoMime
     ? `/api/logo?v=${settings.logoUpdatedAt?.getTime() ?? 0}`
     : settings.logoUrl;
 

@@ -1,6 +1,5 @@
 import { CalendarRange, Save, Settings, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { activateSeasonAction, saveSeasonAction, updateSettingsAction } from "@/actions/admin";
-import { AutoRefresh } from "@/components/features/auto-refresh";
 import { ActionButton } from "@/components/ui/action-button";
 import { ActionForm } from "@/components/ui/action-form";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +20,6 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="space-y-4">
-      <AutoRefresh intervalMs={15000} />
       <Card>
         <CardHeader>
           <CardTitle>Identidade e regras</CardTitle>
@@ -51,7 +49,7 @@ export default async function AdminSettingsPage() {
 
             <div className="rounded-xl border border-line/70 p-3">
               <LogoUpload
-                hasLogo={Boolean(settings.logoData)}
+                hasLogo={Boolean(settings.logoMime)}
                 version={settings.logoUpdatedAt?.getTime() ?? null}
               />
             </div>

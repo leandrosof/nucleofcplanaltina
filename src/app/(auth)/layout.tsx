@@ -4,7 +4,7 @@ import { getSettings } from "@/lib/settings";
 
 export default async function AuthLayout({ children }: { children: React.ReactNode }) {
   const settings = await getSettings();
-  const logoUrl = settings.logoData
+  const logoUrl = settings.logoMime
     ? `/api/logo?v=${settings.logoUpdatedAt?.getTime() ?? 0}`
     : settings.logoUrl;
 

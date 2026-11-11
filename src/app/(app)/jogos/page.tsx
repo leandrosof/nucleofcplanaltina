@@ -2,7 +2,6 @@ import Link from "next/link";
 import { CalendarDays, Clock, LogIn, MapPin, Pencil, Users } from "lucide-react";
 import { checkInRachaAction } from "@/actions/racha";
 import { AttendanceControls } from "@/components/features/attendance-controls";
-import { AutoRefresh } from "@/components/features/auto-refresh";
 import { OrganizerToggle } from "@/components/features/organizer-toggle";
 import { EventCalendar } from "@/components/features/event-calendar";
 import { ShareEventButton } from "@/components/features/share-event-button";
@@ -76,7 +75,6 @@ export default async function UpcomingPage({
 
   return (
     <div>
-      <AutoRefresh intervalMs={15000} />
       <PageHeader
         eyebrow="Agenda do grupo"
         title="Próximos jogos"

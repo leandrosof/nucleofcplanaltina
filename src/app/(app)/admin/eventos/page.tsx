@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Briefcase, CalendarDays, Clock, MapPin, Pencil, Users } from "lucide-react";
 import { setEventStatusAction, updateEventAction } from "@/actions/admin";
-import { AutoRefresh } from "@/components/features/auto-refresh";
 import { ActionButton } from "@/components/ui/action-button";
 import { ActionForm } from "@/components/ui/action-form";
 import { Alert } from "@/components/ui/alert";
@@ -15,11 +14,10 @@ import { EventCoverUpload } from "@/components/features/image-uploads";
 import { ShareEventButton } from "@/components/features/share-event-button";
 import { SurfaceBadge } from "@/components/features/surface-badge";
 import { Progress } from "@/components/ui/progress";
-import { listAllEvents } from "@/db/queries/events";
+import { listAllEvents, type EventBase } from "@/db/queries/events";
 import { getSettings } from "@/lib/settings";
 import { formatTime, toDateTimeLocal } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import type { EventRow } from "@/db/schema";
 
 export const metadata = { title: "Eventos" };
 
@@ -28,7 +26,7 @@ function EventFields({
   timeZone,
   idPrefix,
 }: {
-  event?: EventRow;
+  event?: EventBase;
   timeZone: string;
   idPrefix: string;
 }) {
@@ -161,7 +159,6 @@ export default async function AdminEventsPage({
 
   return (
     <div className="space-y-4">
-      <AutoRefresh intervalMs={15000} />
       <Card>
         <CardBody className="flex flex-wrap items-center justify-between gap-3">
           <div>
